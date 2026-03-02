@@ -1,21 +1,29 @@
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/types";
+import { createServerClient as createSupabaseServerClient } from "@/lib/supabase/ssr";
+import { cookies } from "next/headers";
 
-// Server-side client — import only in Server Components, Route Handlers, Server Actions
-// Uses the service role key to bypass RLS when needed; default to anon key for user-scoped queries
 export function createServerClient() {
+  const cookieStore = cookies();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!supabaseUrl || !supabaseServiceKey) {
+  if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
-      "Missing Supabase environment variables. Check .env.local."
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
     );
   }
 
-  return createClient<Database>(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false },
+  return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value }) => cookieStore.set(name, value));
+        } catch {
+          // Server Components cannot always mutate response cookies.
+        }
+      },
+    },
   });
 }

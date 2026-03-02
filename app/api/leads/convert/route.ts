@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
 // ─── POST /api/leads/convert ──────────────────────────────────────────────────
@@ -6,7 +7,6 @@ import { createServerClient } from "@/lib/supabase/server";
 //
 // Body: {
 //   lead_id: string,
-//   company_id: string,
 //   scheduled_start: string,      // ISO 8601 datetime
 //   duration_minutes: number,     // positive integer
 //   revenue_estimate?: number,    // defaults to 0
@@ -18,6 +18,9 @@ import { createServerClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
     let body: unknown;
     try {
       body = await req.json();
@@ -31,7 +34,6 @@ export async function POST(req: NextRequest) {
 
     const {
       lead_id,
-      company_id,
       scheduled_start,
       duration_minutes,
       revenue_estimate = 0,
@@ -42,9 +44,6 @@ export async function POST(req: NextRequest) {
     // Validate required fields
     if (!lead_id || typeof lead_id !== "string") {
       return NextResponse.json({ success: false, error: "lead_id is required" }, { status: 400 });
-    }
-    if (!company_id || typeof company_id !== "string") {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
     }
     if (!scheduled_start || typeof scheduled_start !== "string") {
       return NextResponse.json({ success: false, error: "scheduled_start is required (ISO 8601)" }, { status: 400 });
@@ -58,14 +57,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "scheduled_start is not a valid date" }, { status: 400 });
     }
 
-    const db = createServerClient();
-
     // 1. Fetch lead — validate it belongs to this company and is not already converted
     const { data: lead, error: leadFetchError } = await db
       .from("leads")
       .select("id, company_id, customer_id, service_type, status")
       .eq("id", lead_id)
-      .eq("company_id", company_id)
+      .eq("company_id", companyId)
       .single();
 
     if (leadFetchError || !lead) {
@@ -95,7 +92,7 @@ export async function POST(req: NextRequest) {
     const { data: job, error: jobError } = await db
       .from("jobs")
       .insert({
-        company_id,
+        company_id: companyId,
         customer_id: lead.customer_id ?? undefined,
         technician_id: typeof technician_id === "string" ? technician_id : null,
         job_date: jobDate,
@@ -125,6 +122,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, job }, { status: 201 });
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/leads/convert] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },

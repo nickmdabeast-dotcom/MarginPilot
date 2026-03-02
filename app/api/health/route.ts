@@ -5,6 +5,5 @@ export async function GET() {
     ok: true,
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "MISSING",
     anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "set" : "MISSING",
-    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING",
   });
 }

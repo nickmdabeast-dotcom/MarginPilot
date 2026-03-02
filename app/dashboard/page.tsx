@@ -22,9 +22,6 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { UploadCSV } from "@/components/ui/UploadCSV";
 
-// ─── Demo company — no auth in Phase 1 ───────────────────────────────────────
-const DEMO_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
-
 // ─── Mock data (shown before any upload) ─────────────────────────────────────
 const MOCK_JOBS: JobInput[] = [
   { id: "j1", technician_id: "t1", technician_name: "Mike Torres",   revenue_estimate: 420,  duration_estimate_hours: 2,   urgency: 2 },
@@ -381,7 +378,7 @@ export default function DashboardPage() {
       const res = await fetch("/api/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company_id: DEMO_COMPANY_ID, date }),
+        body: JSON.stringify({ date }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
@@ -423,7 +420,7 @@ export default function DashboardPage() {
             Export from your FSM tool and upload. Analysis runs automatically.
           </p>
         </div>
-        <UploadCSV companyId={DEMO_COMPANY_ID} onSuccess={handleUploadSuccess} />
+        <UploadCSV onSuccess={handleUploadSuccess} />
       </motion.div>
 
       {/* Optimization state */}

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
 // ─── PATCH /api/jobs/[id] ─────────────────────────────────────────────────────
 // Updates dispatch-relevant fields on a job.
-// Requires company_id in the body to verify ownership.
 //
 // Body: {
-//   company_id: string,           (required — ownership check)
 //   technician_id?: string | null,
 //   scheduled_start?: string,     (ISO 8601)
 //   scheduled_end?: string,       (ISO 8601)
@@ -23,6 +22,9 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
     const { id } = params;
 
     if (!id) {
@@ -40,12 +42,8 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: "Request body must be a JSON object" }, { status: 400 });
     }
 
-    const { company_id, technician_id, scheduled_start, scheduled_end, status, order_index } =
+    const { technician_id, scheduled_start, scheduled_end, status, order_index } =
       body as Record<string, unknown>;
-
-    if (!company_id || typeof company_id !== "string") {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
-    }
 
     // Build update payload — only include fields that were provided
     const updates: Record<string, unknown> = {};
@@ -85,14 +83,12 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: "No updatable fields provided" }, { status: 400 });
     }
 
-    const db = createServerClient();
-
     // Verify ownership and apply update atomically
     const { data: job, error } = await db
       .from("jobs")
       .update(updates)
       .eq("id", id)
-      .eq("company_id", company_id)   // ownership check
+      .eq("company_id", companyId)
       .select()
       .single();
 
@@ -109,6 +105,13 @@ export async function PATCH(
     return NextResponse.json({ success: true, job });
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/jobs/[id] PATCH] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },

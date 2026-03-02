@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
 // ─── POST /api/leads ──────────────────────────────────────────────────────────
 // Body: {
-//   company_id: string,
 //   full_name: string,
 //   phone: string,
 //   email?: string,
@@ -18,6 +18,9 @@ import { createServerClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
     let body: unknown;
     try {
       body = await req.json();
@@ -30,7 +33,6 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      company_id,
       full_name,
       phone,
       email,
@@ -41,9 +43,6 @@ export async function POST(req: NextRequest) {
       notes,
     } = body as Record<string, unknown>;
 
-    if (!company_id || typeof company_id !== "string") {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
-    }
     if (!full_name || typeof full_name !== "string" || !full_name.trim()) {
       return NextResponse.json({ success: false, error: "full_name is required" }, { status: 400 });
     }
@@ -51,13 +50,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "phone is required" }, { status: 400 });
     }
 
-    const db = createServerClient();
-
     // 1. Create customer
     const { data: customer, error: customerError } = await db
       .from("customers")
       .insert({
-        company_id,
+        company_id: companyId,
         full_name: (full_name as string).trim(),
         phone: (phone as string).trim(),
         email: typeof email === "string" ? email.trim() || null : null,
@@ -77,7 +74,7 @@ export async function POST(req: NextRequest) {
     const { data: lead, error: leadError } = await db
       .from("leads")
       .insert({
-        company_id,
+        company_id: companyId,
         customer_id: customer.id,
         source: typeof source === "string" ? source : "website",
         service_type: typeof service_type === "string" ? service_type.trim() || null : null,
@@ -98,6 +95,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, lead, customer }, { status: 201 });
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/leads] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },
@@ -106,26 +110,22 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ─── GET /api/leads?company_id=&status= ──────────────────────────────────────
-// Returns all leads for a company, optionally filtered by status.
+// ─── GET /api/leads?status= ───────────────────────────────────────────────────
+// Returns all leads for the authenticated company, optionally filtered by status.
 // Joins customer name for display.
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const company_id = searchParams.get("company_id");
-    const status = searchParams.get("status");
-
-    if (!company_id) {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
-    }
-
     const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
+    const { searchParams } = new URL(req.url);
+    const status = searchParams.get("status");
 
     let query = db
       .from("leads")
       .select("*, customers(full_name, phone, email)")
-      .eq("company_id", company_id)
+      .eq("company_id", companyId)
       .order("created_at", { ascending: false });
 
     if (status) {
@@ -141,6 +141,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, leads: data ?? [] });
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/leads GET] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },

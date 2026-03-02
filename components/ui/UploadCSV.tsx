@@ -33,13 +33,12 @@ interface UploadErrorDetails {
 }
 
 interface UploadCSVProps {
-  companyId: string;
   onSuccess: (date: string) => void;
 }
 
 type UploadState = "idle" | "uploading" | "success" | "error";
 
-export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
+export function UploadCSV({ onSuccess }: UploadCSVProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -77,7 +76,6 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
     try {
       const form = new FormData();
       form.append("file", file);
-      form.append("company_id", companyId);
 
       const res = await fetch("/api/jobs/upload", {
         method: "POST",
