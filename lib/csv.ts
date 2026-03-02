@@ -43,30 +43,51 @@ export const HEADER_ALIASES: Record<string, string> = {
   staff: "technician_name",
   name: "technician_name",
 
-  // revenue_estimate
-  revenue: "revenue_estimate",
-  revenue_estimate: "revenue_estimate",
-  price: "revenue_estimate",
-  amount: "revenue_estimate",
-  total: "revenue_estimate",
-  charge: "revenue_estimate",
-  cost: "revenue_estimate",
-  fee: "revenue_estimate",
-  value: "revenue_estimate",
+  // job_name
+  job: "job_name",
+  jobname: "job_name",
+  job_name: "job_name",
+  service: "job_name",
+  description: "job_name",
+  work_order: "job_name",
+  title: "job_name",
 
-  // duration_estimate_hours
-  duration: "duration_estimate_hours",
-  duration_hrs: "duration_estimate_hours",
-  duration_hours: "duration_estimate_hours",
-  durationhrs: "duration_estimate_hours",
-  durationhours: "duration_estimate_hours",
-  duration_estimate_hours: "duration_estimate_hours",
-  hours: "duration_estimate_hours",
-  hrs: "duration_estimate_hours",
-  time: "duration_estimate_hours",
-  labor_hours: "duration_estimate_hours",
-  labourhours: "duration_estimate_hours",
-  est_hours: "duration_estimate_hours",
+  // job_id
+  jobid: "job_id",
+  job_id: "job_id",
+  id: "job_id",
+  external_id: "job_id",
+  ticket: "job_id",
+  ticket_id: "job_id",
+  work_order_id: "job_id",
+
+  // revenue
+  revenue: "revenue",
+  revenue_estimate: "revenue",
+  price: "revenue",
+  amount: "revenue",
+  total: "revenue",
+  charge: "revenue",
+  cost: "revenue",
+  fee: "revenue",
+  value: "revenue",
+
+  // duration_hours / duration_minutes
+  duration: "duration_hours",
+  duration_hrs: "duration_hours",
+  duration_hours: "duration_hours",
+  durationhrs: "duration_hours",
+  durationhours: "duration_hours",
+  duration_estimate_hours: "duration_hours",
+  hours: "duration_hours",
+  hrs: "duration_hours",
+  labor_hours: "duration_hours",
+  labourhours: "duration_hours",
+  est_hours: "duration_hours",
+  duration_minutes: "duration_minutes",
+  duration_mins: "duration_minutes",
+  minutes: "duration_minutes",
+  mins: "duration_minutes",
 
   // urgency
   urgency: "urgency",
@@ -77,37 +98,65 @@ export const HEADER_ALIASES: Record<string, string> = {
   urgency_level: "urgency",
   importance: "urgency",
 
-  // job_date
-  job_date: "job_date",
-  date: "job_date",
-  schedule_date: "job_date",
-  scheduled_date: "job_date",
-  scheduledate: "job_date",
-  day: "job_date",
-  service_date: "job_date",
-  servicedate: "job_date",
-  appointment_date: "job_date",
-  work_date: "job_date",
+  // schedule_date
+  date: "schedule_date",
+  schedule_date: "schedule_date",
+  scheduled_date: "schedule_date",
+  scheduledate: "schedule_date",
+  day: "schedule_date",
+  service_date: "schedule_date",
+  servicedate: "schedule_date",
+  appointment_date: "schedule_date",
+  work_date: "schedule_date",
+  job_date: "schedule_date",
 };
 
 /** Canonical column names required in every upload row. */
 export const REQUIRED_COLUMNS = [
   "technician_name",
-  "revenue_estimate",
-  "duration_estimate_hours",
+  "job_id",
+  "job_name",
+  "revenue",
+  "duration_hours",
   "urgency",
-  "job_date",
+  "schedule_date",
 ] as const;
 
 // ─── Delimiter detection ───────────────────────────────────────────────────────
 
 function detectDelimiter(firstLine: string): "," | ";" | "\t" {
+  if (firstLine.includes(";") && !firstLine.includes(",")) return ";";
   const commas = (firstLine.match(/,/g) ?? []).length;
   const semicolons = (firstLine.match(/;/g) ?? []).length;
   const tabs = (firstLine.match(/\t/g) ?? []).length;
   if (semicolons > commas && semicolons >= tabs) return ";";
   if (tabs > commas) return "\t";
   return ",";
+}
+
+function hasRequiredColumn(
+  required: (typeof REQUIRED_COLUMNS)[number],
+  columns: Set<string>
+): boolean {
+  if (required === "duration_hours") {
+    return columns.has("duration_hours") || columns.has("duration_minutes");
+  }
+  return columns.has(required);
+}
+
+function alignValuesToHeaders(values: string[], canonicalHeaders: string[]): string[] {
+  if (values.length <= canonicalHeaders.length) return values;
+
+  const aligned = [...values];
+  const revenueIdx = canonicalHeaders.indexOf("revenue");
+
+  // Common broken CSV case: unquoted thousands separator in currency values.
+  while (aligned.length > canonicalHeaders.length && revenueIdx >= 0 && revenueIdx + 1 < aligned.length) {
+    aligned[revenueIdx] = `${aligned[revenueIdx]},${aligned[revenueIdx + 1]}`;
+    aligned.splice(revenueIdx + 1, 1);
+  }
+
+  return aligned;
 }
 
 // ─── Row parsing ───────────────────────────────────────────────────────────────
@@ -148,6 +197,7 @@ export interface CSVParseResult {
   rows: ParsedRow[];
   headerRaw: string[];
   headerNormalized: string[];
+  headerCanonical: string[];
   delimiter: string;
   missingColumns: string[];
 }
@@ -168,6 +218,7 @@ export function parseCSV(text: string): CSVParseResult {
       rows: [],
       headerRaw: [],
       headerNormalized: [],
+      headerCanonical: [],
       delimiter: ",",
       missingColumns: Array.from(REQUIRED_COLUMNS),
     };
@@ -182,10 +233,10 @@ export function parseCSV(text: string): CSVParseResult {
 
   // Identify which required columns are missing from the header
   const canonicalSet = new Set(canonicalHeaders);
-  const missingColumns = REQUIRED_COLUMNS.filter((c) => !canonicalSet.has(c));
+  const missingColumns = REQUIRED_COLUMNS.filter((c) => !hasRequiredColumn(c, canonicalSet));
 
   const rows: ParsedRow[] = lines.slice(1).map((line) => {
-    const values = parseCSVRow(line, delimiter);
+    const values = alignValuesToHeaders(parseCSVRow(line, delimiter), canonicalHeaders);
     return Object.fromEntries(
       canonicalHeaders.map((h, i) => [h, values[i] ?? ""])
     );
@@ -195,6 +246,7 @@ export function parseCSV(text: string): CSVParseResult {
     rows,
     headerRaw: rawHeaders,
     headerNormalized: normalizedHeaders,
+    headerCanonical: canonicalHeaders,
     delimiter,
     missingColumns,
   };
