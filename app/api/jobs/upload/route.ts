@@ -1,15 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { parseCSV, REQUIRED_COLUMNS } from "@/lib/csv";
-import { validateJobRow, insertJobs } from "@/services/jobs";
+import { validateJobRow, insertJobs, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
+
+const DEBUG_CSV_UPLOAD =
+  process.env.DEBUG_CSV_UPLOAD === "1" || process.env.DEBUG?.includes("csv-upload");
+
+function sanitizeValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 80) return trimmed;
+  return `${trimmed.slice(0, 77)}...`;
+}
+
+function sanitizeRow(row: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, sanitizeValue(String(value ?? ""))])
+  );
+}
+
+function debugLog(label: string, payload: unknown) {
+  if (!DEBUG_CSV_UPLOAD) return;
+  console.log(`[csv-upload] ${label}`, payload);
+}
 
 // ─── POST /api/jobs/upload ────────────────────────────────────────────────────
 // Body: multipart/form-data
 //   file       — CSV file (required)
 //   company_id — UUID string (required)
 //
-// Success:  { success: true, inserted: number, failed: RowError[], warnings: string[] }
+// Success:  { success: true, inserted: number, updated: number, rejectedRows: RowError[] }
 // Failure:  { success: false, error: string, details?: UploadErrorDetails }
 
 export async function POST(req: NextRequest) {
@@ -60,7 +80,14 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Parse CSV (includes header normalization + alias mapping)
-  const { rows, headerRaw, headerNormalized, missingColumns } = parseCSV(csvText);
+  const { rows, headerRaw, headerNormalized, headerCanonical, missingColumns } = parseCSV(csvText);
+  debugLog("headers", {
+    raw: headerRaw,
+    normalized: headerNormalized,
+    canonical: headerCanonical,
+  });
+  debugLog("parsedRowCount", rows.length);
+  debugLog("sampleRows", rows.slice(0, 3).map((row) => sanitizeRow(row)));
 
   if (rows.length === 0) {
     return NextResponse.json(
@@ -79,6 +106,7 @@ export async function POST(req: NextRequest) {
           parsedRowCount: rows.length,
           headerRaw,
           headerNormalized,
+          headerCanonical,
           requiredColumns: Array.from(REQUIRED_COLUMNS),
           missingColumns,
           sampleRejections: [],
@@ -89,7 +117,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 5. Validate each row
-  const validRows = [];
+  const validRows: ValidJobRow[] = [];
   const parseErrors: Array<{ row: number; reason: string }> = [];
 
   for (let i = 0; i < rows.length; i++) {
@@ -98,6 +126,12 @@ export async function POST(req: NextRequest) {
       validRows.push(result.data);
     } else {
       parseErrors.push({ row: result.error.row, reason: result.error.message });
+      if (parseErrors.length <= 10) {
+        debugLog("rowRejected", {
+          row: result.error.row,
+          reason: result.error.message,
+        });
+      }
     }
   }
 
@@ -110,6 +144,7 @@ export async function POST(req: NextRequest) {
           parsedRowCount: rows.length,
           headerRaw,
           headerNormalized,
+          headerCanonical,
           requiredColumns: Array.from(REQUIRED_COLUMNS),
           missingColumns,
           sampleRejections: parseErrors.slice(0, 10),
@@ -156,6 +191,8 @@ export async function POST(req: NextRequest) {
     {
       success: true,
       inserted: result.inserted,
+      updated: result.updated,
+      rejectedRows: allFailed,
       failed: allFailed,
       warnings: allFailed.length > 0
         ? [`${allFailed.length} row(s) skipped — see "failed" for details`]

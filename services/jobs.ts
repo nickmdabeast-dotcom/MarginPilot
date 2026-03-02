@@ -23,8 +23,13 @@ function parseRevenue(raw: string): number {
 }
 
 /** Handles plain hours, values with units ("2.5h", "150m"), and minutes→hours. */
-function parseDuration(raw: string): number {
-  const cleaned = raw.trim().toLowerCase();
+function parseDurationHours(rawHours: string, rawMinutes: string): number {
+  const mins = parseFloat((rawMinutes ?? "").trim());
+  if (!isNaN(mins) && mins > 0) {
+    return mins / 60;
+  }
+
+  const cleaned = (rawHours ?? "").trim().toLowerCase();
   // "150min" or "150m" → minutes
   const minMatch = cleaned.match(/^([\d.]+)\s*m(?:in(?:utes?)?)?$/);
   if (minMatch) return parseFloat(minMatch[1]) / 60;
@@ -57,10 +62,13 @@ function parseUrgency(raw: string): number | null {
 }
 
 export interface ValidJobRow {
-  job_date: string;
+  sourceRow: number;
+  schedule_date: string;
+  job_id: string;
+  job_name: string;
   technician_name: string;
-  revenue_estimate: number;
-  duration_estimate_hours: number;
+  revenue: number;
+  duration_hours: number;
   urgency: number;
 }
 
@@ -79,27 +87,38 @@ export type ValidationResult =
  * so the first data row is typically 2).
  *
  * Coercions applied:
- *   revenue_estimate    — strips $, commas, then parseFloat
- *   duration_estimate_hours — handles "2.5h", "150m/min", plain number
+ *   revenue             — strips $, commas, then parseFloat
+ *   duration_hours      — handles "2.5h", "150m/min", plain number
  *   urgency             — accepts 1-5 integer OR label (high/med/low)
- *   job_date            — accepts YYYY-MM-DD or MM/DD/YYYY
+ *   schedule_date       — accepts YYYY-MM-DD or MM/DD/YYYY
  */
 export function validateJobRow(
   raw: ParsedRow,
   rowIndex: number
 ): ValidationResult {
-  if (!raw.technician_name?.trim()) {
+  const trimmedTechName = raw.technician_name?.trim() ?? "";
+  if (!trimmedTechName) {
     return { ok: false, error: { row: rowIndex, message: "technician_name is required" } };
   }
 
-  const revenue = parseRevenue(raw.revenue_estimate ?? "");
-  if (isNaN(revenue) || revenue < 0) {
-    return { ok: false, error: { row: rowIndex, message: `invalid revenue — got "${raw.revenue_estimate}" (expected a number, e.g. "$150" or "150.00")` } };
+  const trimmedJobId = raw.job_id?.trim() ?? "";
+  if (!trimmedJobId) {
+    return { ok: false, error: { row: rowIndex, message: "job_id is required" } };
   }
 
-  const duration = parseDuration(raw.duration_estimate_hours ?? "");
+  const trimmedJobName = raw.job_name?.trim() ?? "";
+  if (!trimmedJobName) {
+    return { ok: false, error: { row: rowIndex, message: "job_name is required" } };
+  }
+
+  const revenue = parseRevenue(raw.revenue ?? "");
+  if (isNaN(revenue) || revenue < 0) {
+    return { ok: false, error: { row: rowIndex, message: `invalid revenue — got "${raw.revenue}" (expected a number, e.g. "$150" or "150.00")` } };
+  }
+
+  const duration = parseDurationHours(raw.duration_hours ?? "", raw.duration_minutes ?? "");
   if (isNaN(duration) || duration <= 0) {
-    return { ok: false, error: { row: rowIndex, message: `invalid duration — got "${raw.duration_estimate_hours}" (expected hours like "2.5", "2.5h", or "150min")` } };
+    return { ok: false, error: { row: rowIndex, message: `invalid duration — got "${raw.duration_hours ?? raw.duration_minutes}" (expected hours like "2.5", "2.5h", or minutes like "150")` } };
   }
 
   const urgency = parseUrgency(raw.urgency ?? "");
@@ -107,24 +126,27 @@ export function validateJobRow(
     return { ok: false, error: { row: rowIndex, message: `invalid urgency — got "${raw.urgency}" (expected 1–5 or "high"/"medium"/"low")` } };
   }
 
-  const jobDate = parseDate(raw.job_date ?? "");
-  if (!jobDate) {
-    return { ok: false, error: { row: rowIndex, message: `invalid date — got "${raw.job_date}" (expected YYYY-MM-DD or MM/DD/YYYY)` } };
+  const scheduleDate = parseDate(raw.schedule_date ?? "");
+  if (!scheduleDate) {
+    return { ok: false, error: { row: rowIndex, message: `invalid date — got "${raw.schedule_date}" (expected YYYY-MM-DD or MM/DD/YYYY)` } };
   }
+
+  const roundedUrgency = Math.min(5, Math.max(1, Math.round(urgency)));
 
   return {
     ok: true,
     data: {
-      job_date: jobDate,
-      technician_name: raw.technician_name.trim(),
-      revenue_estimate: revenue,
-      duration_estimate_hours: duration,
-      urgency: Math.round(urgency),
+      sourceRow: rowIndex,
+      schedule_date: scheduleDate,
+      job_id: trimmedJobId,
+      job_name: trimmedJobName,
+      technician_name: trimmedTechName,
+      revenue,
+      duration_hours: duration,
+      urgency: roundedUrgency,
     },
   };
 }
-
-// ─── Insertion ────────────────────────────────────────────────────────────────
 
 export interface InsertJobsParams {
   rows: ValidJobRow[];
@@ -136,13 +158,13 @@ export interface InsertJobsParams {
 
 export interface InsertJobsResult {
   inserted: number;
+  updated: number;
   failed: RowError[];
 }
 
 /**
- * Inserts a batch of validated job rows into the database.
- * Failures are collected per-row so callers receive a partial-success summary
- * rather than an all-or-nothing outcome.
+ * Inserts or updates a batch of validated job rows into the database.
+ * Existing key fallback is used because this schema does not store external job_id.
  */
 export async function insertJobs({
   rows,
@@ -151,35 +173,68 @@ export async function insertJobs({
   getTechnicianId,
 }: InsertJobsParams): Promise<InsertJobsResult> {
   let inserted = 0;
+  let updated = 0;
   const failed: RowError[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
       const techId = await getTechnicianId(row.technician_name);
-      const { error } = await db.from("jobs").insert({
+      const payload = {
         company_id: companyId,
         technician_id: techId,
-        job_date: row.job_date,
-        revenue_estimate: row.revenue_estimate,
-        duration_estimate_hours: row.duration_estimate_hours,
+        job_date: row.schedule_date,
+        revenue_estimate: row.revenue,
+        duration_estimate_hours: row.duration_hours,
         urgency: row.urgency,
-      });
+      };
+
+      const { data: existing, error: findError } = await db
+        .from("jobs")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("technician_id", techId)
+        .eq("job_date", row.schedule_date)
+        .eq("revenue_estimate", row.revenue)
+        .eq("duration_estimate_hours", row.duration_hours)
+        .eq("urgency", row.urgency)
+        .maybeSingle();
+
+      if (findError) {
+        failed.push({ row: row.sourceRow, message: findError.message });
+        continue;
+      }
+
+      if (existing?.id) {
+        const { error } = await db
+          .from("jobs")
+          .update(payload)
+          .eq("id", existing.id);
+
+        if (error) {
+          failed.push({ row: row.sourceRow, message: error.message });
+        } else {
+          updated++;
+        }
+        continue;
+      }
+
+      const { error } = await db.from("jobs").insert(payload);
 
       if (error) {
-        failed.push({ row: i + 2, message: error.message });
+        failed.push({ row: row.sourceRow, message: error.message });
       } else {
         inserted++;
       }
     } catch (err) {
       failed.push({
-        row: i + 2,
+        row: row.sourceRow,
         message: err instanceof Error ? err.message : "Unknown insertion error",
       });
     }
   }
 
-  return { inserted, failed };
+  return { inserted, updated, failed };
 }
 
 // ─── Fetching ─────────────────────────────────────────────────────────────────

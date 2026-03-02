@@ -1,5 +1,5 @@
- TECHNICIAN ,Amount ($),Hours,Priority,Schedule Date
-Alice Smith,$150.00,2.5,high,06/15/2025
-Bob Jones,350.50,4.0,3,06/15/2025
-Charlie Brown,"200,00",1.5,low,2025-06-15
-Diana Lee,$1,200.00,8.0,5,2025-06-15
+ Technician Name , Ticket , Description , Amount ($) , Duration Minutes , Priority , Day
+Alice Smith,TKT-2001,Mini Split Install,$150.00,150,high,06/15/2025
+Bob Jones,TKT-2002,Duct Cleanup,350.50,240,3,06/15/2025
+Charlie Brown,TKT-2003,Drain Clearing,"$1,050.00",90,low,2025-06-15
+Diana Lee,TKT-2004,Water Heater Replace,"$1,200.00",480,5,2025-06-15
