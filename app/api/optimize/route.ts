@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import { optimizeJobs } from "@/lib/optimize";
+import { optimizeJobs, redatePlan } from "@/lib/optimize";
 import { getJobsByDate } from "@/services/jobs";
+import type { Json } from "@/types";
 
 // ─── POST /api/optimize ───────────────────────────────────────────────────────
 // Body: { company_id: string, date: string, average_hourly_labor_cost?: number }
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
     const result = optimizeJobs(jobs, laborCost);
 
     // 5. Persist run record (best-effort — don't fail the response if this errors)
+    // Store the re-dated dispatch plan so apply-optimization can look it up by run_id.
     const { data: runRecord, error: insertError } = await db
       .from("optimization_runs")
       .insert({
@@ -63,6 +65,7 @@ export async function POST(req: NextRequest) {
         run_date: date,
         total_revenue_before: result.baseline.total_revenue,
         total_revenue_after: result.optimized.total_revenue,
+        dispatch_plan: redatePlan(result.dispatch_plan, date) as unknown as Json,
       })
       .select("id")
       .single();

@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@/lib/supabase/server";
+import type { DispatchTechAssignment } from "@/lib/optimize";
+
+// ─── POST /api/dispatch/apply-optimization ────────────────────────────────────
+// Applies the optimizer's suggested technician assignments and job ordering
+// to the jobs table. Intended to be called after user confirms on the dispatch page.
+//
+// Body: {
+//   company_id: string,
+//   optimization_run_id?: string,         // optional — for audit; not required to proceed
+//   assignments?: DispatchTechAssignment[], // if omitted, fetched from run record
+// }
+//
+// The route requires EITHER optimization_run_id (to load plan from DB)
+// OR an explicit assignments array. If both are supplied, assignments takes precedence.
+//
+// Returns: { success: true, updated_count: number }
+//       or { success: false, error: string }
+
+export async function POST(req: NextRequest) {
+  try {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ success: false, error: "Request body must be a JSON object" }, { status: 400 });
+    }
+
+    const { company_id, optimization_run_id, assignments } = body as Record<string, unknown>;
+
+    if (!company_id || typeof company_id !== "string") {
+      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
+    }
+
+    const db = createServerClient();
+
+    let plan: DispatchTechAssignment[];
+
+    if (Array.isArray(assignments) && assignments.length > 0) {
+      // Caller passed assignments directly
+      plan = assignments as DispatchTechAssignment[];
+    } else if (typeof optimization_run_id === "string") {
+      // Load plan from the stored run record
+      const { data: run, error: runError } = await db
+        .from("optimization_runs")
+        .select("id, dispatch_plan")
+        .eq("id", optimization_run_id)
+        .eq("company_id", company_id)
+        .single();
+
+      if (runError || !run) {
+        return NextResponse.json(
+          { success: false, error: "Optimization run not found or does not belong to this company" },
+          { status: 404 }
+        );
+      }
+
+      if (!run.dispatch_plan || !Array.isArray(run.dispatch_plan)) {
+        return NextResponse.json(
+          { success: false, error: "No dispatch plan stored for this optimization run" },
+          { status: 422 }
+        );
+      }
+
+      plan = run.dispatch_plan as unknown as DispatchTechAssignment[];
+    } else {
+      return NextResponse.json(
+        { success: false, error: "Provide either optimization_run_id or an assignments array" },
+        { status: 400 }
+      );
+    }
+
+    // Apply each assignment — update jobs in parallel
+    let updated_count = 0;
+    const errors: string[] = [];
+
+    await Promise.all(
+      plan.flatMap(({ technician_id, jobs }) =>
+        jobs.map(async ({ job_id, suggested_start, order_index }) => {
+          const { error } = await db
+            .from("jobs")
+            .update({
+              technician_id,
+              scheduled_start: suggested_start,
+              order_index,
+            })
+            .eq("id", job_id)
+            .eq("company_id", company_id);   // ownership check
+
+          if (error) {
+            errors.push(`job ${job_id}: ${error.message}`);
+          } else {
+            updated_count++;
+          }
+        })
+      )
+    );
+
+    return NextResponse.json(
+      {
+        success: true,
+        updated_count,
+        ...(errors.length > 0 ? { warnings: errors } : {}),
+      },
+      { status: 200 }
+    );
+
+  } catch (err) {
+    console.error("[/api/dispatch/apply-optimization] Unhandled error:", err);
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500 }
+    );
+  }
+}

@@ -64,11 +64,38 @@ export interface Diagnostics {
   idle_capacity_hours: number;        // (num_techs * 8) − total_assigned_hours
 }
 
+// ── Dispatch plan types ───────────────────────────────────────────────────────
+
+/**
+ * A single job assignment within a dispatch plan.
+ * suggested_start is computed by chaining jobs sequentially from 08:00 on the job date.
+ */
+export interface DispatchJobAssignment {
+  job_id: string;
+  /** ISO 8601 datetime — suggested start time for this job. */
+  suggested_start: string;
+  order_index: number;
+}
+
+/**
+ * All jobs assigned to one technician in the optimizer's suggested dispatch plan.
+ */
+export interface DispatchTechAssignment {
+  technician_id: string;
+  jobs: DispatchJobAssignment[];
+}
+
 export interface OptimizationResult {
   baseline: ScheduleSnapshot;
   optimized: ScheduleSnapshot;
   delta: OptimizationDelta;
   diagnostics: Diagnostics;
+  /**
+   * Structured dispatch plan produced from the optimized assignment.
+   * Jobs are chained sequentially per technician starting at 08:00 on the given date.
+   * Pass this to POST /api/dispatch/apply-optimization to persist to the jobs table.
+   */
+  dispatch_plan: DispatchTechAssignment[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -254,6 +281,7 @@ export function optimizeJobs(jobs: JobInput[], averageHourlyLaborCost?: number):
       optimized: emptySnapshot,
       delta: { revenue_per_hour_change: 0, overtime_reduction: 0, workload_balance_improvement: 0, simulation: null },
       diagnostics: { underutilized_count: 0, overloaded_count: 0, revenue_concentration_ratio: 0, idle_capacity_hours: 0 },
+      dispatch_plan: [],
     };
   }
 
@@ -338,7 +366,62 @@ export function optimizeJobs(jobs: JobInput[], averageHourlyLaborCost?: number):
 
   const diagnostics = computeDiagnostics(optimized);
 
-  return { baseline, optimized, delta, diagnostics };
+  // ── Step 9: Build dispatch plan ────────────────────────────────────────────
+  const dispatch_plan = buildDispatchPlan(slots);
+
+  return { baseline, optimized, delta, diagnostics, dispatch_plan };
+}
+
+// ── Dispatch plan builder ─────────────────────────────────────────────────────
+
+/**
+ * Builds a structured dispatch plan from the post-allocation technician slots.
+ * Jobs are chained sequentially per technician starting at 08:00 UTC on an
+ * arbitrary reference date (the caller should shift to the actual job date
+ * before persisting via /api/dispatch/apply-optimization).
+ *
+ * The reference date is kept neutral here because optimizeJobs() is date-agnostic.
+ * The API route replaces the date prefix before writing to the DB.
+ */
+function buildDispatchPlan(slots: TechSlot[]): DispatchTechAssignment[] {
+  const START_HOUR = 8; // 08:00 reference
+
+  return slots
+    .filter((slot) => slot.assigned_jobs.length > 0)
+    .map((slot) => {
+      let cursor = START_HOUR * 60; // minutes from midnight
+      const jobs: DispatchJobAssignment[] = slot.assigned_jobs.map((job, idx) => {
+        // Reference ISO string: use a neutral base date that the API will replace
+        const suggestedStart = minutesToIso(cursor);
+        cursor += job.duration_estimate_hours * 60;
+        return { job_id: job.id, suggested_start: suggestedStart, order_index: idx };
+      });
+      return { technician_id: slot.id, jobs };
+    });
+}
+
+/** Converts minutes-from-midnight to a reference ISO string (1970-01-01 base). */
+function minutesToIso(minutes: number): string {
+  const h = Math.floor(minutes / 60).toString().padStart(2, "0");
+  const m = Math.floor(minutes % 60).toString().padStart(2, "0");
+  return `1970-01-01T${h}:${m}:00.000Z`;
+}
+
+/**
+ * Re-dates a dispatch plan by replacing the neutral date prefix (1970-01-01)
+ * with the actual job date. Called by /api/dispatch/apply-optimization.
+ */
+export function redatePlan(
+  plan: DispatchTechAssignment[],
+  date: string                 // YYYY-MM-DD
+): DispatchTechAssignment[] {
+  return plan.map((tech) => ({
+    ...tech,
+    jobs: tech.jobs.map((j) => ({
+      ...j,
+      suggested_start: j.suggested_start.replace("1970-01-01", date),
+    })),
+  }));
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
