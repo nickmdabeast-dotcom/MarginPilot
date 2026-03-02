@@ -5,6 +5,10 @@ import { createBrowserClient } from "@/lib/supabase/ssr";
 let browserClient: ReturnType<typeof createBrowserClient> | undefined;
 
 export function createBrowserSupabaseClient() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
   if (!browserClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

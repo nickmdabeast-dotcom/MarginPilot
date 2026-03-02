@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -17,8 +17,8 @@ function safeRedirectPath(nextPath: string | null): string {
 
 export default function SignupPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+  const [nextParam, setNextParam] = useState<string | null>(null);
 
   const [email, setEmail] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -28,7 +28,14 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const redirectTo = safeRedirectPath(searchParams.get("next"));
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setNextParam(params.get("next"));
+  }, []);
+
+  const redirectTo = safeRedirectPath(nextParam);
+  const loginHref = nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : "/login";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,6 +51,12 @@ export default function SignupPage() {
 
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (!supabase) {
+      setError("Unable to initialize Supabase client.");
       setSubmitting(false);
       return;
     }
@@ -76,9 +89,9 @@ export default function SignupPage() {
     });
 
     if (!onboardingRes.ok) {
-      const payload = (await onboardingRes.json().catch(() => null)) as
-        | { error?: string }
-        | null;
+      const payload = (await onboardingRes.json().catch(() => null)) as {
+        error?: string;
+      } | null;
       setError(payload?.error ?? "Unable to finish account onboarding.");
       setSubmitting(false);
       return;
@@ -204,11 +217,8 @@ export default function SignupPage() {
           </form>
 
           <p className="mt-5 text-sm text-gray-400">
-            Already have an account?{" "}
-            <Link
-              href={`/login${searchParams.get("next") ? `?next=${encodeURIComponent(searchParams.get("next") ?? "")}` : ""}`}
-              className="text-blue-300 hover:text-blue-200"
-            >
+            Already have an account?{' '}
+            <Link href={loginHref} className="text-blue-300 hover:text-blue-200">
               Log in
             </Link>
           </p>
