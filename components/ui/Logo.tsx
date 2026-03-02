@@ -50,7 +50,7 @@ export function Logo({
           />
         </svg>
       </div>
-      <span className={cn(text, textColor)}>HVAC Revenue OS</span>
+      <span className={cn(text, textColor)}>MarginPilot</span>
     </div>
   );
 

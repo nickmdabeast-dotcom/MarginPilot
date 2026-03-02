@@ -357,7 +357,7 @@ export default function MarketingPage() {
             transition={{ duration: 0.6, delay: 0.2 }}
           >
             <Zap className="w-4 h-4 mr-2 text-blue-400" />
-            <span className="text-sm font-medium">Revenue Intelligence for HVAC Operators</span>
+            <span className="text-sm font-medium">Revenue Intelligence for Field Service Operators</span>
           </motion.div>
 
           <motion.h1
@@ -387,8 +387,8 @@ export default function MarketingPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.85 }}
           >
-            Most HVAC companies optimize marketing spend while leaving field economics
-            completely unmanaged. HVAC Revenue OS surfaces exactly where revenue leaks —
+            Most field service companies optimize marketing spend while leaving field economics
+            completely unmanaged. MarginPilot surfaces exactly where revenue leaks —
             per truck, per tech hour, per day.
           </motion.p>
 
@@ -439,7 +439,7 @@ export default function MarketingPage() {
             <span className="text-white">the Wrong Thing</span>
           </h2>
           <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-            HVAC companies invest heavily in lead generation while leaving money on
+            Field service companies invest heavily in lead generation while leaving money on
             the table every single day through inefficient scheduling, undetected
             overtime risk, and misallocated jobs.
           </p>
@@ -479,7 +479,7 @@ export default function MarketingPage() {
             <span className="text-white">One Revenue System.</span>
           </h2>
           <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-            HVAC Revenue OS combines allocation intelligence, margin protection, and
+            MarginPilot combines allocation intelligence, margin protection, and
             revenue forecasting into a single operational layer for your field team.
           </p>
         </motion.div>
@@ -617,7 +617,7 @@ export default function MarketingPage() {
               <Logo size="sm" variant="dark" />
             </div>
             <div className="text-gray-400 text-sm">
-              © {new Date().getFullYear()} HVAC Revenue OS. Revenue operations for field service teams.
+              © {new Date().getFullYear()} MarginPilot. Revenue operations for field service teams.
             </div>
           </div>
         </div>

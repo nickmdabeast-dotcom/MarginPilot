@@ -1,5 +1,5 @@
 -- Migration: 0001_initial_schema
--- Description: Initial tables for HVAC Revenue OS
+-- Description: Initial tables for MarginPilot
 
 -- Enable UUID generation
 create extension if not exists "pgcrypto";

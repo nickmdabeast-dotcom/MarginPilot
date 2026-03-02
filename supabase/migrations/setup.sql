@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- HVAC Revenue OS — Full Setup Script
+-- MarginPilot — Full Setup Script
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ═══════════════════════════════════════════════════════════════
 

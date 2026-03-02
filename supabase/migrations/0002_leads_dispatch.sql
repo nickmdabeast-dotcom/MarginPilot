@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- HVAC Revenue OS — Leads + Dispatch Extension
+-- MarginPilot — Leads + Dispatch Extension
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ═══════════════════════════════════════════════════════════════
 

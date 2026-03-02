@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "HVAC Revenue OS",
-  description: "Revenue operations platform for HVAC businesses.",
+  title: "MarginPilot",
+  description: "Revenue operations platform for field service businesses.",
 };
 
 export default function RootLayout({
