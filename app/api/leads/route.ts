@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 // ─── POST /api/leads ──────────────────────────────────────────────────────────
 // Body: {
 //   full_name: string,

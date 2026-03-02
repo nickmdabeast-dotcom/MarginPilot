@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 // ─── PATCH /api/jobs/[id] ─────────────────────────────────────────────────────
 // Updates dispatch-relevant fields on a job.
 //

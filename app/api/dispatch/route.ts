@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 // ─── GET /api/dispatch?date= ──────────────────────────────────────────────────
 // Returns all technicians for the authenticated user's company and all jobs for
 // a given date, ordered by technician then order_index.

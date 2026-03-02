@@ -3,6 +3,8 @@ import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 import type { DispatchTechAssignment } from "@/lib/optimize";
 
+export const dynamic = "force-dynamic";
+
 // ─── POST /api/dispatch/apply-optimization ────────────────────────────────────
 // Applies the optimizer's suggested technician assignments and job ordering
 // to the jobs table. Intended to be called after user confirms on the dispatch page.

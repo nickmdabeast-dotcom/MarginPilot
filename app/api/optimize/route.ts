@@ -5,6 +5,8 @@ import { optimizeJobs, redatePlan } from "@/lib/optimize";
 import { getJobsByDate } from "@/services/jobs";
 import type { Json } from "@/types";
 
+export const dynamic = "force-dynamic";
+
 // ─── POST /api/optimize ───────────────────────────────────────────────────────
 // Body: { date: string, average_hourly_labor_cost?: number }
 // Returns: { success: true, run_id: string|null, result: OptimizationResult }

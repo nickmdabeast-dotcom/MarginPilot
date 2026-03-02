@@ -5,6 +5,8 @@ import { parseCSV, REQUIRED_COLUMNS } from "@/lib/csv";
 import { validateJobRow, insertJobs, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
 
+export const dynamic = "force-dynamic";
+
 const DEBUG_CSV_UPLOAD =
   process.env.DEBUG_CSV_UPLOAD === "1" || process.env.DEBUG?.includes("csv-upload");
 
