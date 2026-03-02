@@ -7,7 +7,54 @@ type DbClient = SupabaseClient<Database>;
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_YYYYMMDD = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_MMDDYYYY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+
+/** Maps text urgency labels to numeric 1–5 values. */
+const URGENCY_LABELS: Record<string, number> = {
+  critical: 5, emergency: 5, urgent: 5, high: 5,
+  medium: 3, med: 3, normal: 3, moderate: 3, standard: 3,
+  low: 1, minor: 1, routine: 1,
+};
+
+/** Strips currency symbols and thousands-separator commas before parsing. */
+function parseRevenue(raw: string): number {
+  return parseFloat(raw.replace(/[$,]/g, "").trim());
+}
+
+/** Handles plain hours, values with units ("2.5h", "150m"), and minutes→hours. */
+function parseDuration(raw: string): number {
+  const cleaned = raw.trim().toLowerCase();
+  // "150min" or "150m" → minutes
+  const minMatch = cleaned.match(/^([\d.]+)\s*m(?:in(?:utes?)?)?$/);
+  if (minMatch) return parseFloat(minMatch[1]) / 60;
+  // "2.5h" or "2.5hr(s)"
+  const hrMatch = cleaned.match(/^([\d.]+)\s*h(?:r?s?)?$/);
+  if (hrMatch) return parseFloat(hrMatch[1]);
+  return parseFloat(cleaned);
+}
+
+/** Parses YYYY-MM-DD or MM/DD/YYYY → YYYY-MM-DD, or returns null. */
+function parseDate(raw: string): string | null {
+  const trimmed = (raw ?? "").trim();
+  if (DATE_YYYYMMDD.test(trimmed)) return trimmed;
+  const m = trimmed.match(DATE_MMDDYYYY);
+  if (m) {
+    const [, month, day, year] = m;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+/** Parses urgency from 1-5 integer or label ("high", "low", etc.). */
+function parseUrgency(raw: string): number | null {
+  const trimmed = (raw ?? "").trim().toLowerCase();
+  // Try numeric first
+  const n = parseInt(trimmed, 10);
+  if (!isNaN(n)) return n;
+  // Try label
+  return URGENCY_LABELS[trimmed] ?? null;
+}
 
 export interface ValidJobRow {
   job_date: string;
@@ -30,39 +77,49 @@ export type ValidationResult =
  * Validates a single parsed CSV row against the expected job schema.
  * `rowIndex` is the 1-based row number used for error messages (header = 1,
  * so the first data row is typically 2).
+ *
+ * Coercions applied:
+ *   revenue_estimate    — strips $, commas, then parseFloat
+ *   duration_estimate_hours — handles "2.5h", "150m/min", plain number
+ *   urgency             — accepts 1-5 integer OR label (high/med/low)
+ *   job_date            — accepts YYYY-MM-DD or MM/DD/YYYY
  */
 export function validateJobRow(
   raw: ParsedRow,
   rowIndex: number
 ): ValidationResult {
-  const revenue = Number(raw.revenue_estimate);
-  const duration = Number(raw.duration_estimate_hours);
-  const urgency = Number(raw.urgency);
-
   if (!raw.technician_name?.trim()) {
     return { ok: false, error: { row: rowIndex, message: "technician_name is required" } };
   }
+
+  const revenue = parseRevenue(raw.revenue_estimate ?? "");
   if (isNaN(revenue) || revenue < 0) {
-    return { ok: false, error: { row: rowIndex, message: `invalid revenue_estimate: "${raw.revenue_estimate}"` } };
+    return { ok: false, error: { row: rowIndex, message: `invalid revenue — got "${raw.revenue_estimate}" (expected a number, e.g. "$150" or "150.00")` } };
   }
+
+  const duration = parseDuration(raw.duration_estimate_hours ?? "");
   if (isNaN(duration) || duration <= 0) {
-    return { ok: false, error: { row: rowIndex, message: `invalid duration_estimate_hours: "${raw.duration_estimate_hours}"` } };
+    return { ok: false, error: { row: rowIndex, message: `invalid duration — got "${raw.duration_estimate_hours}" (expected hours like "2.5", "2.5h", or "150min")` } };
   }
-  if (!Number.isInteger(urgency) || urgency < 1 || urgency > 5) {
-    return { ok: false, error: { row: rowIndex, message: `urgency must be 1–5, got "${raw.urgency}"` } };
+
+  const urgency = parseUrgency(raw.urgency ?? "");
+  if (urgency === null || urgency < 1 || urgency > 5) {
+    return { ok: false, error: { row: rowIndex, message: `invalid urgency — got "${raw.urgency}" (expected 1–5 or "high"/"medium"/"low")` } };
   }
-  if (!DATE_RE.test(raw.job_date ?? "")) {
-    return { ok: false, error: { row: rowIndex, message: `job_date must be YYYY-MM-DD, got "${raw.job_date}"` } };
+
+  const jobDate = parseDate(raw.job_date ?? "");
+  if (!jobDate) {
+    return { ok: false, error: { row: rowIndex, message: `invalid date — got "${raw.job_date}" (expected YYYY-MM-DD or MM/DD/YYYY)` } };
   }
 
   return {
     ok: true,
     data: {
-      job_date: raw.job_date,
+      job_date: jobDate,
       technician_name: raw.technician_name.trim(),
       revenue_estimate: revenue,
       duration_estimate_hours: duration,
-      urgency,
+      urgency: Math.round(urgency),
     },
   };
 }

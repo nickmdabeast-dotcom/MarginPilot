@@ -11,10 +11,22 @@ import {
   X,
 } from "lucide-react";
 
+const COLUMN_HINT =
+  "Technician Name, Revenue, Duration (hrs), Urgency, Date — or common variants (Tech, Price, Hours, Priority, Schedule Date, …)";
+
 interface UploadResult {
   inserted: number;
   failed: { row: number; message: string }[];
   warnings: string[];
+}
+
+interface UploadErrorDetails {
+  parsedRowCount?: number;
+  headerRaw?: string[];
+  headerNormalized?: string[];
+  requiredColumns?: string[];
+  missingColumns?: string[];
+  sampleRejections?: Array<{ row: number; reason: string }>;
 }
 
 interface UploadCSVProps {
@@ -31,6 +43,7 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
   const [state, setState] = useState<UploadState>("idle");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<UploadErrorDetails | null>(null);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
@@ -38,6 +51,7 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
     setState("idle");
     setResult(null);
     setError(null);
+    setErrorDetails(null);
   }
 
   function clearFile() {
@@ -45,6 +59,7 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
     setState("idle");
     setResult(null);
     setError(null);
+    setErrorDetails(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -53,6 +68,7 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
 
     setState("uploading");
     setError(null);
+    setErrorDetails(null);
     setResult(null);
 
     try {
@@ -70,12 +86,12 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
       if (!res.ok || !json.success) {
         setState("error");
         setError(json.error ?? "Upload failed");
+        setErrorDetails(json.details ?? null);
         return;
       }
 
       setResult(json);
       setState("success");
-      // Trigger optimization for the selected date
       onSuccess(date);
     } catch (err) {
       setState("error");
@@ -127,7 +143,7 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
                 Click to select CSV
               </p>
               <p className="text-xs text-gray-600 mt-0.5">
-                Columns: job_date, technician_name, revenue_estimate, duration_estimate_hours, urgency
+                {COLUMN_HINT}
               </p>
             </div>
           </>
@@ -185,8 +201,22 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
             </div>
             {result.failed.length > 0 && (
               <p className="text-xs text-orange-400 pl-6">
-                {result.failed.length} row{result.failed.length !== 1 ? "s" : ""} skipped (see console)
+                {result.failed.length} row{result.failed.length !== 1 ? "s" : ""} skipped (see details below)
               </p>
+            )}
+            {result.failed.length > 0 && (
+              <ul className="mt-2 space-y-0.5 pl-6">
+                {result.failed.slice(0, 5).map((f, i) => (
+                  <li key={i} className="text-xs text-orange-300/80">
+                    Row {f.row}: {f.message}
+                  </li>
+                ))}
+                {result.failed.length > 5 && (
+                  <li className="text-xs text-gray-500">
+                    …and {result.failed.length - 5} more
+                  </li>
+                )}
+              </ul>
             )}
           </motion.div>
         )}
@@ -197,12 +227,60 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="rounded-xl border border-red-500/20 bg-red-500/10 p-4"
+            className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 space-y-3"
           >
             <div className="flex items-center gap-2 text-red-400">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span className="text-sm font-medium">{error}</span>
             </div>
+
+            {errorDetails && (
+              <div className="space-y-2 text-xs">
+                {/* Missing columns */}
+                {errorDetails.missingColumns && errorDetails.missingColumns.length > 0 && (
+                  <div>
+                    <p className="text-orange-400 font-medium">Missing columns:</p>
+                    <p className="text-orange-300/80 mt-0.5 font-mono">
+                      {errorDetails.missingColumns.join(", ")}
+                    </p>
+                  </div>
+                )}
+
+                {/* Detected headers */}
+                {errorDetails.headerRaw && errorDetails.headerRaw.length > 0 && (
+                  <div>
+                    <p className="text-gray-400 font-medium">Headers detected:</p>
+                    <p className="text-gray-500 mt-0.5 font-mono truncate">
+                      {errorDetails.headerRaw.join(", ")}
+                    </p>
+                  </div>
+                )}
+
+                {/* Sample rejections */}
+                {errorDetails.sampleRejections && errorDetails.sampleRejections.length > 0 && (
+                  <div>
+                    <p className="text-orange-400 font-medium">
+                      Row errors ({errorDetails.parsedRowCount} parsed):
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {errorDetails.sampleRejections.slice(0, 3).map((r, i) => (
+                        <li key={i} className="text-orange-300/80">
+                          Row {r.row}: {r.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Column hint */}
+                <div className="pt-1 border-t border-red-500/20">
+                  <p className="text-gray-500">
+                    <span className="text-gray-400 font-medium">Accepted headers:</span>{" "}
+                    {COLUMN_HINT}
+                  </p>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

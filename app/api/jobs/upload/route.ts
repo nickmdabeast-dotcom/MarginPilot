@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import { parseCSV } from "@/lib/csv";
+import { parseCSV, REQUIRED_COLUMNS } from "@/lib/csv";
 import { validateJobRow, insertJobs } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
 
@@ -9,9 +9,8 @@ import { findOrCreateTechnician } from "@/services/technicians";
 //   file       — CSV file (required)
 //   company_id — UUID string (required)
 //
-// Returns:
-//   { success: true,  inserted: number, failed: RowError[], warnings: string[] }
-//   { success: false, error: string }
+// Success:  { success: true, inserted: number, failed: RowError[], warnings: string[] }
+// Failure:  { success: false, error: string, details?: UploadErrorDetails }
 
 export async function POST(req: NextRequest) {
   // 1. Parse multipart form
@@ -60,8 +59,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. Parse CSV
-  const rows = parseCSV(csvText);
+  // 3. Parse CSV (includes header normalization + alias mapping)
+  const { rows, headerRaw, headerNormalized, missingColumns } = parseCSV(csvText);
+
   if (rows.length === 0) {
     return NextResponse.json(
       { success: false, error: "CSV has no data rows (only header or empty)" },
@@ -69,16 +69,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4. Validate each row
+  // 4. Fail fast if required columns are structurally absent
+  if (missingColumns.length > 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "CSV is missing required columns",
+        details: {
+          parsedRowCount: rows.length,
+          headerRaw,
+          headerNormalized,
+          requiredColumns: Array.from(REQUIRED_COLUMNS),
+          missingColumns,
+          sampleRejections: [],
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  // 5. Validate each row
   const validRows = [];
-  const parseErrors = [];
+  const parseErrors: Array<{ row: number; reason: string }> = [];
 
   for (let i = 0; i < rows.length; i++) {
     const result = validateJobRow(rows[i], i + 2); // +2: header is row 1
     if (result.ok) {
       validRows.push(result.data);
     } else {
-      parseErrors.push(result.error);
+      parseErrors.push({ row: result.error.row, reason: result.error.message });
     }
   }
 
@@ -87,13 +106,20 @@ export async function POST(req: NextRequest) {
       {
         success: false,
         error: "No valid rows found in CSV",
-        failed: parseErrors,
+        details: {
+          parsedRowCount: rows.length,
+          headerRaw,
+          headerNormalized,
+          requiredColumns: Array.from(REQUIRED_COLUMNS),
+          missingColumns,
+          sampleRejections: parseErrors.slice(0, 10),
+        },
       },
-      { status: 422 }
+      { status: 400 }
     );
   }
 
-  // 5. Connect to Supabase
+  // 6. Connect to Supabase
   let db: ReturnType<typeof createServerClient>;
   try {
     db = createServerClient();
@@ -107,7 +133,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Insert jobs (technician upsert handled per-row)
+  // 7. Insert jobs (technician upsert handled per-row)
   const techCache = new Map<string, string>();
 
   const result = await insertJobs({
@@ -120,8 +146,11 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Merge parse errors + insert errors
-  const allFailed = [...parseErrors, ...result.failed];
+  // Merge parse errors + insert errors for the response
+  const allFailed = [
+    ...parseErrors.map((e) => ({ row: e.row, message: e.reason })),
+    ...result.failed,
+  ];
 
   return NextResponse.json(
     {

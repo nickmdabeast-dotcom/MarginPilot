@@ -1,0 +1,5 @@
+ TECHNICIAN ,Amount ($),Hours,Priority,Schedule Date
+Alice Smith,$150.00,2.5,high,06/15/2025
+Bob Jones,350.50,4.0,3,06/15/2025
+Charlie Brown,"200,00",1.5,low,2025-06-15
+Diana Lee,$1,200.00,8.0,5,2025-06-15
