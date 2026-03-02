@@ -39,13 +39,13 @@ export function Navbar() {
         <nav className="hidden items-center gap-1 md:flex">
           {navLinks.map((link) => {
             const isActive =
-              pathname === link.href || pathname.startsWith(`${link.href}/`);
+              pathname === link.href || pathname.startsWith(link.href + "/");
             return (
               <Link
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+                  "rounded-md px-3 py-1.5 text-sm transition-colors",
                   isActive
                     ? "bg-white/10 text-white"
                     : "text-gray-400 hover:bg-white/5 hover:text-white"
