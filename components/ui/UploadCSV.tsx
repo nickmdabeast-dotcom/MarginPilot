@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 
 const COLUMN_HINT =
-  "Technician Name, Revenue, Duration (hrs), Urgency, Date — or common variants (Tech, Price, Hours, Priority, Schedule Date, …)";
+  "Your CSV headers can be: Technician Name, Job ID, Job Name, Revenue, Duration (hrs), Urgency, Schedule Date";
 
 interface UploadResult {
   inserted: number;
+  updated?: number;
+  rejectedRows?: { row: number; message: string }[];
   failed: { row: number; message: string }[];
   warnings: string[];
 }
@@ -24,6 +26,7 @@ interface UploadErrorDetails {
   parsedRowCount?: number;
   headerRaw?: string[];
   headerNormalized?: string[];
+  headerCanonical?: string[];
   requiredColumns?: string[];
   missingColumns?: string[];
   sampleRejections?: Array<{ row: number; reason: string }>;
@@ -196,7 +199,8 @@ export function UploadCSV({ companyId, onSuccess }: UploadCSVProps) {
             <div className="flex items-center gap-2 text-emerald-400">
               <CheckCircle className="h-4 w-4 shrink-0" />
               <span className="text-sm font-semibold">
-                {result.inserted} job{result.inserted !== 1 ? "s" : ""} uploaded — running analysis…
+                {result.inserted} job{result.inserted !== 1 ? "s" : ""} inserted
+                {(result.updated ?? 0) > 0 ? `, ${result.updated} updated` : ""} — running analysis…
               </span>
             </div>
             {result.failed.length > 0 && (

@@ -1,4 +1,4 @@
-Technician Name;Revenue;Duration (hrs);Urgency;Date
-Alice Smith;150.00;2.5;3;2025-06-15
-Bob Jones;$350.50;4.0;5;2025-06-15
-Charlie Brown;200;1.5;medium;2025-06-15
+Technician Name;Job ID;Job Name;Revenue;Duration (hrs);Urgency;Schedule Date
+Alice Smith;JOB-3001;AC Tune-Up;150.00;2.5;3;2025-06-15
+Bob Jones;JOB-3002;Leak Repair;$350.50;4.0;5;2025-06-15
+Charlie Brown;JOB-3003;Coil Cleaning;200;1.5;medium;2025-06-15
