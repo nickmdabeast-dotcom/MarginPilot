@@ -71,12 +71,10 @@ interface DispatchJob {
 
 function JobCard({
   job,
-  companyId,
   onStatusChange,
   isDragging = false,
 }: {
   job: DispatchJob;
-  companyId: string;
   onStatusChange: (jobId: string, status: string) => void;
   isDragging?: boolean;
 }) {
@@ -155,12 +153,10 @@ function JobCard({
 function TechColumn({
   tech,
   jobs,
-  companyId,
   onStatusChange,
 }: {
   tech: Technician | null; // null = unassigned column
   jobs: DispatchJob[];
-  companyId: string;
   onStatusChange: (jobId: string, status: string) => void;
 }) {
   const techId = tech?.id ?? "unassigned";
@@ -198,7 +194,6 @@ function TechColumn({
             <JobCard
               key={job.id}
               job={job}
-              companyId={companyId}
               onStatusChange={onStatusChange}
             />
           ))}
@@ -422,7 +417,6 @@ export default function DispatchPage() {
                   key={tech.id}
                   tech={tech}
                   jobs={getJobsForTech(tech.id)}
-                  companyId={DEMO_COMPANY_ID}
                   onStatusChange={handleStatusChange}
                 />
               ))}
@@ -433,7 +427,6 @@ export default function DispatchPage() {
                   key="unassigned"
                   tech={null}
                   jobs={unassignedJobs}
-                  companyId={DEMO_COMPANY_ID}
                   onStatusChange={handleStatusChange}
                 />
               )}

@@ -68,7 +68,7 @@ export async function PATCH(
     if (status !== undefined) {
       if (typeof status !== "string" || !ALLOWED_STATUSES.has(status)) {
         return NextResponse.json(
-          { success: false, error: `status must be one of: ${[...ALLOWED_STATUSES].join(", ")}` },
+          { success: false, error: `status must be one of: ${Array.from(ALLOWED_STATUSES).join(", ")}` },
           { status: 400 }
         );
       }
