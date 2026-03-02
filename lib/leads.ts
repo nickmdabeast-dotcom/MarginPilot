@@ -203,7 +203,13 @@ export async function updateLeadStatus(
 ): Promise<ApiResult<null>> {
   // Direct Supabase client update — no dedicated API route exists yet
   try {
-    const { supabase: db } = await import("@/lib/supabase/client");
+    const { createBrowserSupabaseClient } = await import("@/lib/supabase/client");
+    const db = createBrowserSupabaseClient();
+
+    if (!db) {
+      return { success: false, error: "Supabase client unavailable" };
+    }
+
     const { error } = await db
       .from("leads")
       .update({ status })
