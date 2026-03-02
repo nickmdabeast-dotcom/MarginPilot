@@ -1,13 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
+import { cn } from "@/lib/utils";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const navLinks = [
   { label: "Dashboard", href: "/dashboard" },
+  { label: "Dispatch", href: "/dispatch" },
+  { label: "Leads", href: "/leads" },
   { label: "Jobs", href: "/jobs" },
   { label: "Customers", href: "/customers" },
   { label: "Reports", href: "/reports" },
@@ -15,6 +18,7 @@ const navLinks = [
 
 export function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const supabase = createBrowserSupabaseClient();
 
   async function handleSignOut() {
@@ -33,7 +37,12 @@ export function Navbar() {
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-md px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+                pathname === link.href
+                  ? "bg-white/10 text-white"
+                  : "text-gray-400 hover:bg-white/5 hover:text-white"
+              )}
             >
               {link.label}
             </Link>
