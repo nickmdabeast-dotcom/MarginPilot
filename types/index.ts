@@ -30,6 +30,95 @@ export type Database = {
         };
         Relationships: [];
       };
+      customers: {
+        Row: {
+          id: string;
+          company_id: string;
+          full_name: string;
+          phone: string;
+          email: string | null;
+          address: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          full_name: string;
+          phone: string;
+          email?: string | null;
+          address?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          full_name?: string;
+          phone?: string;
+          email?: string | null;
+          address?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customers_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      leads: {
+        Row: {
+          id: string;
+          company_id: string;
+          customer_id: string | null;
+          source: string;
+          service_type: string | null;
+          urgency: string;
+          status: string;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          customer_id?: string | null;
+          source?: string;
+          service_type?: string | null;
+          urgency?: string;
+          status?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          customer_id?: string | null;
+          source?: string;
+          service_type?: string | null;
+          urgency?: string;
+          status?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "leads_company_id_fkey";
+            columns: ["company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "leads_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       technicians: {
         Row: {
           id: string;
@@ -67,30 +156,51 @@ export type Database = {
           id: string;
           company_id: string;
           technician_id: string | null;
+          customer_id: string | null;
           job_date: string;
           revenue_estimate: number;
           duration_estimate_hours: number;
           urgency: number;
+          status: string;
+          earliest_start: string | null;
+          latest_end: string | null;
+          scheduled_start: string | null;
+          scheduled_end: string | null;
+          order_index: number;
           created_at: string;
         };
         Insert: {
           id?: string;
           company_id: string;
           technician_id?: string | null;
+          customer_id?: string | null;
           job_date: string;
           revenue_estimate: number;
           duration_estimate_hours: number;
           urgency: number;
+          status?: string;
+          earliest_start?: string | null;
+          latest_end?: string | null;
+          scheduled_start?: string | null;
+          scheduled_end?: string | null;
+          order_index?: number;
           created_at?: string;
         };
         Update: {
           id?: string;
           company_id?: string;
           technician_id?: string | null;
+          customer_id?: string | null;
           job_date?: string;
           revenue_estimate?: number;
           duration_estimate_hours?: number;
           urgency?: number;
+          status?: string;
+          earliest_start?: string | null;
+          latest_end?: string | null;
+          scheduled_start?: string | null;
+          scheduled_end?: string | null;
+          order_index?: number;
           created_at?: string;
         };
         Relationships: [
@@ -108,6 +218,13 @@ export type Database = {
             referencedRelation: "technicians";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "jobs_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
         ];
       };
       optimization_runs: {
@@ -117,6 +234,7 @@ export type Database = {
           run_date: string;
           total_revenue_before: number;
           total_revenue_after: number;
+          dispatch_plan: Json | null;
           created_at: string;
         };
         Insert: {
@@ -125,6 +243,7 @@ export type Database = {
           run_date: string;
           total_revenue_before: number;
           total_revenue_after: number;
+          dispatch_plan?: Json | null;
           created_at?: string;
         };
         Update: {
@@ -133,6 +252,7 @@ export type Database = {
           run_date?: string;
           total_revenue_before?: number;
           total_revenue_after?: number;
+          dispatch_plan?: Json | null;
           created_at?: string;
         };
         Relationships: [
