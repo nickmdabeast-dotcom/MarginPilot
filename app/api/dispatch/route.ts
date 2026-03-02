@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
-// ─── GET /api/dispatch?company_id=&date= ─────────────────────────────────────
-// Returns all technicians for a company and all jobs for a given date,
-// ordered by technician then order_index (for kanban rendering).
+export const dynamic = "force-dynamic";
+
+// ─── GET /api/dispatch?date= ──────────────────────────────────────────────────
+// Returns all technicians for the authenticated user's company and all jobs for
+// a given date, ordered by technician then order_index.
 //
 // Query params:
-//   company_id  — required
 //   date        — YYYY-MM-DD (defaults to today)
 //
 // Returns: {
@@ -24,7 +26,6 @@ interface TechnicianRow {
 
 interface DispatchJobRow {
   id: string;
-  company_id: string;
   technician_id: string | null;
   customer_id: string | null;
   job_date: string;
@@ -47,31 +48,28 @@ function today(): string {
 
 export async function GET(req: NextRequest) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
     const { searchParams } = new URL(req.url);
-    const company_id = searchParams.get("company_id");
     const date = searchParams.get("date") ?? today();
 
-    if (!company_id) {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
-    }
     if (!DATE_RE.test(date)) {
       return NextResponse.json({ success: false, error: "date must be YYYY-MM-DD" }, { status: 400 });
     }
-
-    const db = createServerClient();
 
     // Fetch technicians and jobs in parallel
     const [techResult, jobsResult] = await Promise.all([
       db
         .from("technicians")
         .select("id, name, truck_id")
-        .eq("company_id", company_id)
+        .eq("company_id", companyId)
         .order("name"),
 
       db
         .from("jobs")
-        .select("id, company_id, technician_id, customer_id, job_date, revenue_estimate, duration_estimate_hours, urgency, status, scheduled_start, scheduled_end, order_index, customers(full_name), technicians(name)")
-        .eq("company_id", company_id)
+        .select("id, technician_id, customer_id, job_date, revenue_estimate, duration_estimate_hours, urgency, status, scheduled_start, scheduled_end, order_index, customers(full_name), technicians(name)")
+        .eq("company_id", companyId)
         .eq("job_date", date)
         .order("technician_id", { nullsFirst: true })
         .order("order_index"),
@@ -118,6 +116,13 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/dispatch GET] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },

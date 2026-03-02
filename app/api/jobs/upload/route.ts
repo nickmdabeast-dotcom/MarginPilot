@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 import { parseCSV, REQUIRED_COLUMNS } from "@/lib/csv";
 import { validateJobRow, insertJobs, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
+
+export const dynamic = "force-dynamic";
 
 const DEBUG_CSV_UPLOAD =
   process.env.DEBUG_CSV_UPLOAD === "1" || process.env.DEBUG?.includes("csv-upload");
@@ -27,12 +30,35 @@ function debugLog(label: string, payload: unknown) {
 // ─── POST /api/jobs/upload ────────────────────────────────────────────────────
 // Body: multipart/form-data
 //   file       — CSV file (required)
-//   company_id — UUID string (required)
 //
 // Success:  { success: true, inserted: number, updated: number, rejectedRows: RowError[] }
 // Failure:  { success: false, error: string, details?: UploadErrorDetails }
 
 export async function POST(req: NextRequest) {
+  // 0. Require auth + company context first
+  let db: ReturnType<typeof createServerClient>;
+  let companyId: string;
+  try {
+    db = createServerClient();
+    const authContext = await requireCompanyId(db);
+    companyId = authContext.companyId;
+  } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "Database configuration error",
+      },
+      { status: 500 }
+    );
+  }
+
   // 1. Parse multipart form
   let formData: FormData;
   try {
@@ -45,18 +71,10 @@ export async function POST(req: NextRequest) {
   }
 
   const file = formData.get("file");
-  const companyId = formData.get("company_id");
 
   if (!file || typeof file === "string") {
     return NextResponse.json(
       { success: false, error: "file is required (multipart field)" },
-      { status: 400 }
-    );
-  }
-
-  if (!companyId || typeof companyId !== "string" || !companyId.trim()) {
-    return NextResponse.json(
-      { success: false, error: "company_id is required" },
       { status: 400 }
     );
   }
@@ -154,29 +172,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Connect to Supabase
-  let db: ReturnType<typeof createServerClient>;
-  try {
-    db = createServerClient();
-  } catch (err) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: err instanceof Error ? err.message : "Database configuration error",
-      },
-      { status: 500 }
-    );
-  }
-
-  // 7. Insert jobs (technician upsert handled per-row)
+  // 6. Insert jobs (technician upsert handled per-row)
   const techCache = new Map<string, string>();
 
   const result = await insertJobs({
     rows: validRows,
-    companyId: companyId.trim(),
+    companyId,
     db,
     getTechnicianId: async (name) => {
-      const { id } = await findOrCreateTechnician(name, companyId.trim(), db, techCache);
+      const { id } = await findOrCreateTechnician(name, companyId, db, techCache);
       return id;
     },
   });

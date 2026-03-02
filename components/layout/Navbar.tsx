@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useMemo } from "react";
+import { LogOut } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { cn } from "@/lib/utils";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const navLinks = [
   { label: "Dashboard", href: "/dashboard" },
@@ -15,7 +18,18 @@ const navLinks = [
 ];
 
 export function Navbar() {
+  const router = useRouter();
   const pathname = usePathname();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+
+  async function handleSignOut() {
+    if (!supabase) {
+      return;
+    }
+    await supabase.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-900/80 backdrop-blur-sm">
@@ -43,8 +57,14 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Right slot — placeholder for future avatar/auth */}
-        <div className="h-8 w-8 rounded-full bg-white/10" />
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
       </div>
     </header>
   );

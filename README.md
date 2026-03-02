@@ -1,36 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HVAC Revenue OS / MarginPilot
 
-## Getting Started
+Next.js (App Router) + Supabase app for revenue optimization, dispatch, and lead workflows.
 
-First, run the development server:
+## Requirements
+
+- Node.js 18+
+- Supabase project
+
+## Environment Variables
+
+Create `.env.local`:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Notes:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Do not expose or commit service-role keys.
+- This app is configured to run user-scoped queries with RLS, not service-role bypasses.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Database Setup
 
-## Learn More
+Run migrations in order (Supabase SQL editor or your migration runner):
 
-To learn more about Next.js, take a look at the following resources:
+1. `supabase/migrations/0001_initial_schema.sql`
+2. `supabase/migrations/0002_leads_dispatch.sql`
+3. `supabase/migrations/0003_profiles_rls.sql`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`0003_profiles_rls.sql` adds:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `profiles` table (`user_id -> company_id`, role, timestamps)
+- onboarding helpers (`ensure_user_profile`, trigger on `auth.users`)
+- RLS + company-scoped policies for:
+  - `companies`
+  - `profiles`
+  - `technicians`
+  - `jobs`
+  - `optimization_runs`
+  - `customers`
+  - `leads`
+  - optional policies for `messages` / `conversations` / `appointments` if those tables exist
 
-## Deploy on Vercel
+## Install and Run
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm install
+npm run dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open [http://localhost:3000](http://localhost:3000).
+
+## Auth and Onboarding Flow
+
+- Public pages:
+  - `/`
+  - `/login`
+  - `/signup`
+- Protected app pages:
+  - `/dashboard`
+  - `/dispatch`
+  - `/leads`
+  - `/jobs`
+  - `/customers`
+  - `/reports`
+- Protected API routes:
+  - all `/api/*` except `/api/health` and `/api/auth/*`
+
+On first signup/login:
+
+- `POST /api/auth/onboarding` runs `ensure_user_profile(...)`
+- if profile does not exist, it creates:
+  - one `companies` row
+  - one `profiles` row with `role = 'owner'`
+- flow is idempotent and safe to retry
+
+## How To Test
+
+### 1) Signup/Login + Route Protection
+
+1. Visit `/signup` and create an account.
+2. Confirm redirect or confirmation prompt depending on your Supabase email-confirmation setting.
+3. Visit `/dashboard` and `/dispatch` while logged in.
+4. Sign out and revisit `/dashboard`; you should be redirected to `/login`.
+
+### 2) API Auth Enforcement
+
+Logged out request to protected API should return 401:
+
+```bash
+curl -i http://localhost:3000/api/dispatch?date=2026-03-02
+```
+
+### 3) RLS Isolation Check
+
+In Supabase SQL editor, with two users in different companies:
+
+```sql
+-- As user A (or via a user-scoped client), should only return company A rows.
+select id, company_id from jobs;
+
+-- Cross-company direct fetch should return zero rows under RLS.
+select id
+from jobs
+where company_id = 'COMPANY_B_UUID';
+```
+
+Expected: user A cannot read/write company B data.
+
+## Security Notes
+
+- No service-role key is required by app runtime.
+- All app/API access is session-based.
+- Company scoping is enforced in both application queries and database RLS policies.

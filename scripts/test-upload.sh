@@ -6,7 +6,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000}"
-COMPANY_ID="${COMPANY_ID:-00000000-0000-0000-0000-000000000001}"
+AUTH_COOKIE="${AUTH_COOKIE:-}"
 FIXTURE="${1:-valid_commas}"
 CSV_FILE="$(dirname "$0")/../data/${FIXTURE}.csv"
 
@@ -19,11 +19,20 @@ fi
 
 echo "=== Testing CSV upload ==="
 echo "  URL:     $BASE_URL/api/jobs/upload"
-echo "  Company: $COMPANY_ID"
 echo "  File:    $CSV_FILE"
+if [[ -n "$AUTH_COOKIE" ]]; then
+  echo "  Cookie:  provided"
+else
+  echo "  Cookie:  not provided (request will return 401)"
+fi
 echo ""
 
+COOKIE_ARGS=()
+if [[ -n "$AUTH_COOKIE" ]]; then
+  COOKIE_ARGS+=(-H "Cookie: $AUTH_COOKIE")
+fi
+
 curl -s -X POST "$BASE_URL/api/jobs/upload" \
+  "${COOKIE_ARGS[@]}" \
   -F "file=@$CSV_FILE" \
-  -F "company_id=$COMPANY_ID" \
   | jq .

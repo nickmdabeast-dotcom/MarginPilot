@@ -53,12 +53,7 @@ create table if not exists optimization_runs (
 create index if not exists optimization_runs_company_id_idx on optimization_runs (company_id);
 create index if not exists optimization_runs_run_date_idx   on optimization_runs (run_date);
 
--- 6. Seed demo company (fixed UUID matches DEMO_COMPANY_ID in the app)
-insert into companies (id, name)
-values ('00000000-0000-0000-0000-000000000001', 'Demo Company')
-on conflict (id) do nothing;
-
--- 7. Verify
+-- 6. Verify
 select 'companies' as tbl, count(*) from companies
 union all
 select 'technicians', count(*) from technicians

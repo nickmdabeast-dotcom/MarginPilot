@@ -1,10 +1,26 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/types";
+import { createBrowserClient } from "@/lib/supabase/ssr";
 
-// Browser-side singleton — safe to import in Client Components
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+let browserClient: ReturnType<typeof createBrowserClient> | undefined;
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+export function createBrowserSupabaseClient() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (!browserClient) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error(
+        "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
+      );
+    }
+
+    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
+  }
+
+  return browserClient;
+}

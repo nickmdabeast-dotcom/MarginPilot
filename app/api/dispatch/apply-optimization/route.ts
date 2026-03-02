@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 import type { DispatchTechAssignment } from "@/lib/optimize";
+
+export const dynamic = "force-dynamic";
 
 // ─── POST /api/dispatch/apply-optimization ────────────────────────────────────
 // Applies the optimizer's suggested technician assignments and job ordering
 // to the jobs table. Intended to be called after user confirms on the dispatch page.
 //
 // Body: {
-//   company_id: string,
 //   optimization_run_id?: string,         // optional — for audit; not required to proceed
 //   assignments?: DispatchTechAssignment[], // if omitted, fetched from run record
 // }
@@ -20,6 +22,9 @@ import type { DispatchTechAssignment } from "@/lib/optimize";
 
 export async function POST(req: NextRequest) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
+
     let body: unknown;
     try {
       body = await req.json();
@@ -31,13 +36,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Request body must be a JSON object" }, { status: 400 });
     }
 
-    const { company_id, optimization_run_id, assignments } = body as Record<string, unknown>;
-
-    if (!company_id || typeof company_id !== "string") {
-      return NextResponse.json({ success: false, error: "company_id is required" }, { status: 400 });
-    }
-
-    const db = createServerClient();
+    const { optimization_run_id, assignments } = body as Record<string, unknown>;
 
     let plan: DispatchTechAssignment[];
 
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
         .from("optimization_runs")
         .select("id, dispatch_plan")
         .eq("id", optimization_run_id)
-        .eq("company_id", company_id)
+        .eq("company_id", companyId)
         .single();
 
       if (runError || !run) {
@@ -90,7 +89,7 @@ export async function POST(req: NextRequest) {
               order_index,
             })
             .eq("id", job_id)
-            .eq("company_id", company_id);   // ownership check
+            .eq("company_id", companyId);
 
           if (error) {
             errors.push(`job ${job_id}: ${error.message}`);
@@ -111,6 +110,13 @@ export async function POST(req: NextRequest) {
     );
 
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/dispatch/apply-optimization] Unhandled error:", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Internal server error" },

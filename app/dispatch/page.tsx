@@ -22,8 +22,6 @@ import { CSS } from "@dnd-kit/utilities";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEMO_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
-
 const JOB_STATUSES = ["scheduled", "en_route", "on_site", "completed", "canceled"] as const;
 type JobStatus = (typeof JOB_STATUSES)[number];
 
@@ -228,7 +226,7 @@ export default function DispatchPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dispatch?company_id=${DEMO_COMPANY_ID}&date=${d}`);
+      const res = await fetch(`/api/dispatch?date=${d}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       setTechnicians(json.technicians);
@@ -259,7 +257,7 @@ export default function DispatchPage() {
       await fetch(`/api/jobs/${jobId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company_id: DEMO_COMPANY_ID, ...updates }),
+        body: JSON.stringify(updates),
       });
     } catch {
       // Best-effort — local state already updated
