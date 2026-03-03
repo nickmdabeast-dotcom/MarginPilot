@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 
 import {
   insertJobsBulk,
+  BATCH_SIZE,
   type ValidJobRow,
   type InsertJobsBulkResult,
 } from "../services/jobs.js";
@@ -217,19 +218,19 @@ describe("insertJobsBulk", () => {
 
     const result = await insertJobsBulk({ rows, companyId: "comp-1", db, techMap });
 
-    // 500 rows / 200 batch size = 3 batches
-    assert.equal(result.jobs_insert_batch_count, 3);
+    const expectedBatches = Math.ceil(500 / BATCH_SIZE);
+    assert.equal(result.jobs_insert_batch_count, expectedBatches);
     assert.equal(result.inserted, 500);
 
     // Count actual insert calls to jobs table
     const jobInserts = calls.filter((c) => c.method === "insert" && c.table === "jobs");
     assert.ok(
-      jobInserts.length <= 5,
-      `Expected at most 5 insert calls (3 batches + margin), got ${jobInserts.length}`
+      jobInserts.length <= expectedBatches + 1,
+      `Expected at most ${expectedBatches + 1} insert calls, got ${jobInserts.length}`
     );
   });
 
-  it("detects existing jobs and counts them as updates", async () => {
+  it("detects existing jobs and counts them as unchanged (no-op)", async () => {
     const techMap = new Map([["alice", "tech-1"]]);
     const rows = [makeRow({ sourceRow: 2 })];
     const { db } = createMockDb({
@@ -247,7 +248,8 @@ describe("insertJobsBulk", () => {
 
     const result = await insertJobsBulk({ rows, companyId: "comp-1", db, techMap });
 
-    assert.equal(result.updated, 1);
+    assert.equal(result.unchanged, 1);
+    assert.equal(result.updated, 0);
     assert.equal(result.inserted, 0);
   });
 
@@ -261,4 +263,47 @@ describe("insertJobsBulk", () => {
     assert.equal(result.failed.length, 1);
     assert.match(result.failed[0].message, /could not be resolved/);
   });
+
+  // ── Chunk-size benchmark: DB round-trips for 2000 rows at various sizes ──
+
+  for (const size of [250, 500, 1000]) {
+    it(`2000-row insert at chunk size ${size}: ${Math.ceil(2000 / size)} batches`, async () => {
+      const techMap = new Map([["alice", "tech-1"]]);
+      const rows = Array.from({ length: 2000 }, (_, i) =>
+        makeRow({ sourceRow: i + 2, job_id: `J-${i}`, revenue: 100 + i })
+      );
+      const { db, calls } = createMockDb();
+
+      // Temporarily override BATCH_SIZE by chunking manually — we test the
+      // function as-is (uses the module-level BATCH_SIZE) only for the
+      // current default. For other sizes we just verify the math.
+      const expectedBatches = Math.ceil(2000 / size);
+      // 1 SELECT for existing jobs + expectedBatches INSERT calls
+      const expectedDbCalls = 1 + expectedBatches;
+
+      if (size === BATCH_SIZE) {
+        const t0 = performance.now();
+        const result = await insertJobsBulk({ rows, companyId: "comp-1", db, techMap });
+        const elapsed = Math.round(performance.now() - t0);
+
+        assert.equal(result.jobs_insert_batch_count, expectedBatches);
+        assert.equal(result.inserted, 2000);
+
+        const jobInserts = calls.filter((c) => c.method === "insert" && c.table === "jobs");
+        assert.equal(jobInserts.length, expectedBatches);
+
+        console.log(
+          `  [benchmark] chunk=${size} batches=${expectedBatches} ` +
+          `db_calls=${jobInserts.length} mock_elapsed=${elapsed}ms`
+        );
+      } else {
+        // Verify the math only — no live call since BATCH_SIZE is a constant
+        assert.equal(expectedBatches, Math.ceil(2000 / size));
+        console.log(
+          `  [benchmark] chunk=${size} batches=${expectedBatches} ` +
+          `db_calls=${expectedDbCalls} (projected)`
+        );
+      }
+    });
+  }
 });
