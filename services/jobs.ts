@@ -149,6 +149,51 @@ export function validateJobRow(
   };
 }
 
+// ─── Signature collision detection ────────────────────────────────────────────
+
+/**
+ * Computes a composite signature string for a validated job row.
+ * Used to detect duplicate rows within the same upload batch.
+ */
+export function computeJobSignature(row: ValidJobRow): string {
+  return [
+    row.technician_name.toLowerCase().trim(),
+    row.schedule_date,
+    row.revenue,
+    row.duration_hours,
+    row.urgency,
+  ].join("|");
+}
+
+export interface CollisionResult {
+  /** Rows that passed collision check (first occurrence of each signature). */
+  unique: ValidJobRow[];
+  /** Rows rejected as duplicates within the batch. */
+  duplicates: Array<{ row: ValidJobRow; signature: string }>;
+}
+
+/**
+ * Detects rows within the same upload batch that share an identical signature.
+ * The first occurrence is kept; subsequent occurrences are flagged as duplicates.
+ */
+export function detectBatchCollisions(rows: ValidJobRow[]): CollisionResult {
+  const seen = new Map<string, number>(); // signature → first sourceRow
+  const unique: ValidJobRow[] = [];
+  const duplicates: Array<{ row: ValidJobRow; signature: string }> = [];
+
+  for (const row of rows) {
+    const sig = computeJobSignature(row);
+    if (seen.has(sig)) {
+      duplicates.push({ row, signature: sig });
+    } else {
+      seen.set(sig, row.sourceRow);
+      unique.push(row);
+    }
+  }
+
+  return { unique, duplicates };
+}
+
 export interface InsertJobsParams {
   rows: ValidJobRow[];
   companyId: string;
