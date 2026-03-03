@@ -377,7 +377,7 @@ describe("validateJobRow – duration in minutes", () => {
   });
 });
 
-// ── 6. Duplicate signatures within the same upload ──────────────────────────
+// ── 6. Duplicate signatures within the same upload (skipped, not rejected) ──
 
 describe("detectBatchCollisions", () => {
   const makeRow = (overrides: Partial<ValidJobRow> = {}): ValidJobRow => ({
@@ -392,33 +392,160 @@ describe("detectBatchCollisions", () => {
     ...overrides,
   });
 
-  it("detects duplicate signatures and keeps the first occurrence", () => {
+  it("identical duplicate rows: first processes, second is skipped", () => {
     const rows = [
       makeRow({ sourceRow: 2 }),
-      makeRow({ sourceRow: 3 }), // same signature
-      makeRow({ sourceRow: 4, revenue: 999 }), // different signature
+      makeRow({ sourceRow: 3 }), // same job_id → skipped
+      makeRow({ sourceRow: 4, job_id: "J-999" }), // different job_id → unique
     ];
     const { unique, duplicates } = detectBatchCollisions(rows);
-    assert.equal(unique.length, 2);
-    assert.equal(duplicates.length, 1);
-    assert.equal(duplicates[0].row.sourceRow, 3);
+    assert.equal(unique.length, 2, "first occurrence + different row should be unique");
+    assert.equal(duplicates.length, 1, "second identical row should be a duplicate");
+    assert.equal(duplicates[0].row.sourceRow, 3, "duplicate should be the second occurrence");
+    assert.equal(unique[0].sourceRow, 2);
+  });
+
+  it("duplicates should not appear in unique (i.e. not in 'failed')", () => {
+    const rows = [
+      makeRow({ sourceRow: 2 }),
+      makeRow({ sourceRow: 3 }), // same job_id
+      makeRow({ sourceRow: 4 }), // same job_id
+    ];
+    const { unique, duplicates } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 1);
+    assert.equal(unique[0].sourceRow, 2);
+    assert.equal(duplicates.length, 2);
+    const dupRows = duplicates.map((d) => d.row.sourceRow);
+    assert.ok(dupRows.includes(3));
+    assert.ok(dupRows.includes(4));
+  });
+
+  it("totals add up: unique + duplicates = input length", () => {
+    const rows = [
+      makeRow({ sourceRow: 2 }),
+      makeRow({ sourceRow: 3 }), // dup (same job_id)
+      makeRow({ sourceRow: 4, job_id: "J-OTHER" }), // unique
+      makeRow({ sourceRow: 5 }), // dup (same job_id as row 2)
+      makeRow({ sourceRow: 6, job_id: "J-ANOTHER" }), // unique
+    ];
+    const { unique, duplicates } = detectBatchCollisions(rows);
+    assert.equal(
+      unique.length + duplicates.length,
+      rows.length,
+      "rows_valid + rows_skipped should equal total input rows"
+    );
   });
 
   it("returns no duplicates when all signatures are unique", () => {
     const rows = [
       makeRow({ sourceRow: 2, job_id: "J-001" }),
-      makeRow({ sourceRow: 3, job_id: "J-002", revenue: 800 }),
+      makeRow({ sourceRow: 3, job_id: "J-002" }),
     ];
     const { unique, duplicates } = detectBatchCollisions(rows);
     assert.equal(unique.length, 2);
     assert.equal(duplicates.length, 0);
   });
 
-  it("produces consistent signatures via computeJobSignature", () => {
+  it("produces consistent signatures via computeJobSignature (job_id mode)", () => {
     const row = makeRow();
-    const sig1 = computeJobSignature(row);
-    const sig2 = computeJobSignature({ ...row, technician_name: "  Alice  " });
-    assert.equal(sig1, sig2, "Signatures should match after trimming");
+    const r1 = computeJobSignature(row);
+    const r2 = computeJobSignature({ ...row, technician_name: "  Alice  " });
+    assert.equal(r1.signature, r2.signature, "Same job_id → same signature regardless of tech name");
+    assert.equal(r1.mode, "job_id");
+  });
+
+  // ── Signature mode: job_id vs fallback ──
+
+  it("same tech/date/revenue/duration/urgency but different job_id => not duplicate", () => {
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "J-001" }),
+      makeRow({ sourceRow: 3, job_id: "J-002" }), // all other fields identical
+    ];
+    const { unique, duplicates, signature_mode_counts } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 2, "different job_ids should not collide");
+    assert.equal(duplicates.length, 0);
+    assert.equal(signature_mode_counts.job_id, 2);
+    assert.equal(signature_mode_counts.fallback, 0);
+  });
+
+  it("same job_id appears twice => second is skipped", () => {
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "J-100", revenue: 500 }),
+      makeRow({ sourceRow: 3, job_id: "J-100", revenue: 999 }), // same job_id, different revenue
+    ];
+    const { unique, duplicates, signature_mode_counts } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 1);
+    assert.equal(duplicates.length, 1);
+    assert.equal(duplicates[0].row.sourceRow, 3);
+    assert.equal(signature_mode_counts.job_id, 2);
+  });
+
+  it("job_id missing => fallback signature behavior unchanged", () => {
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "" }),
+      makeRow({ sourceRow: 3, job_id: "", revenue: 999 }), // different revenue → different fallback sig
+      makeRow({ sourceRow: 4, job_id: "" }), // same fallback sig as row 2
+    ];
+    const { unique, duplicates, signature_mode_counts } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 2, "row 2 and row 3 are unique by fallback sig");
+    assert.equal(duplicates.length, 1, "row 4 duplicates row 2");
+    assert.equal(duplicates[0].row.sourceRow, 4);
+    assert.equal(signature_mode_counts.fallback, 3);
+    assert.equal(signature_mode_counts.job_id, 0);
+  });
+
+  it("job_id normalization: trimmed and lowercased, numeric treated as string", () => {
+    const r1 = computeJobSignature(makeRow({ job_id: " J-001 " }));
+    const r2 = computeJobSignature(makeRow({ job_id: "j-001" }));
+    const r3 = computeJobSignature(makeRow({ job_id: "12345" }));
+    assert.equal(r1.signature, r2.signature, "trim + lowercase should match");
+    assert.equal(r1.mode, "job_id");
+    assert.equal(r3.signature, "job_id::12345", "numeric job_id should remain string");
+    assert.equal(r3.mode, "job_id");
+  });
+});
+
+// ── Regression: duplicate job_id in same upload → skipped, not failed ────────
+
+describe("detectBatchCollisions – duplicate job_id regression", () => {
+  it("second row with same job_id is skipped (not failed); failed stays empty", () => {
+    const rows: ValidJobRow[] = [
+      {
+        sourceRow: 2,
+        schedule_date: "2025-06-15",
+        job_id: "DUP-001",
+        job_name: "AC Install",
+        technician_name: "Alice",
+        revenue: 1500,
+        duration_hours: 2.5,
+        urgency: 5,
+      },
+      {
+        sourceRow: 3,
+        schedule_date: "2025-06-15",
+        job_id: "DUP-001",
+        job_name: "Different Name",
+        technician_name: "Bob",
+        revenue: 999,
+        duration_hours: 1,
+        urgency: 2,
+      },
+    ];
+
+    const { unique, duplicates, signature_mode_counts } = detectBatchCollisions(rows);
+
+    // First row kept, second skipped
+    assert.equal(unique.length, 1);
+    assert.equal(unique[0].sourceRow, 2);
+
+    // Second row appears in duplicates with the right reason
+    assert.equal(duplicates.length, 1);
+    assert.equal(duplicates[0].row.sourceRow, 3);
+    assert.equal(duplicates[0].signature, "job_id::dup-001");
+
+    // Signature mode
+    assert.equal(signature_mode_counts.job_id, 2);
+    assert.equal(signature_mode_counts.fallback, 0);
   });
 });
 

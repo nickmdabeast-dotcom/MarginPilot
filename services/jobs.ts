@@ -154,23 +154,43 @@ export function validateJobRow(
 
 /**
  * Computes a composite signature string for a validated job row.
- * Used to detect duplicate rows within the same upload batch.
+ *
+ * Strategy:
+ *  - If `job_id` is present (non-empty after trim), use `job_id::<normalized_job_id>`.
+ *    This means two rows with different job_ids are never considered duplicates,
+ *    even when technician/date/revenue/duration/urgency match.
+ *  - Otherwise fall back to the composite key:
+ *    `technician_name|schedule_date|revenue|duration_hours|urgency`.
+ *
+ * Returns `{ signature, mode }` so callers can track which path was used.
  */
-export function computeJobSignature(row: ValidJobRow): string {
-  return [
-    row.technician_name.toLowerCase().trim(),
-    row.schedule_date,
-    row.revenue,
-    row.duration_hours,
-    row.urgency,
-  ].join("|");
+export function computeJobSignature(row: ValidJobRow): { signature: string; mode: "job_id" | "fallback" } {
+  const trimmedJobId = row.job_id.trim();
+  if (trimmedJobId.length > 0) {
+    return {
+      signature: `job_id::${trimmedJobId.toLowerCase()}`,
+      mode: "job_id",
+    };
+  }
+  return {
+    signature: [
+      row.technician_name.toLowerCase().trim(),
+      row.schedule_date,
+      row.revenue,
+      row.duration_hours,
+      row.urgency,
+    ].join("|"),
+    mode: "fallback",
+  };
 }
 
 export interface CollisionResult {
   /** Rows that passed collision check (first occurrence of each signature). */
   unique: ValidJobRow[];
-  /** Rows rejected as duplicates within the batch. */
+  /** Rows skipped as duplicates within the batch. */
   duplicates: Array<{ row: ValidJobRow; signature: string }>;
+  /** How many rows used each signature mode. */
+  signature_mode_counts: { job_id: number; fallback: number };
 }
 
 /**
@@ -181,9 +201,11 @@ export function detectBatchCollisions(rows: ValidJobRow[]): CollisionResult {
   const seen = new Map<string, number>(); // signature → first sourceRow
   const unique: ValidJobRow[] = [];
   const duplicates: Array<{ row: ValidJobRow; signature: string }> = [];
+  const signature_mode_counts = { job_id: 0, fallback: 0 };
 
   for (const row of rows) {
-    const sig = computeJobSignature(row);
+    const { signature: sig, mode } = computeJobSignature(row);
+    signature_mode_counts[mode]++;
     if (seen.has(sig)) {
       duplicates.push({ row, signature: sig });
     } else {
@@ -192,7 +214,7 @@ export function detectBatchCollisions(rows: ValidJobRow[]): CollisionResult {
     }
   }
 
-  return { unique, duplicates };
+  return { unique, duplicates, signature_mode_counts };
 }
 
 export interface InsertJobsParams {
@@ -286,7 +308,8 @@ export async function insertJobs({
 
 // ─── Bulk insert/update ───────────────────────────────────────────────────────
 
-const BATCH_SIZE = 200;
+/** Max rows per INSERT batch. Tuned to balance round-trips vs payload size. */
+export const BATCH_SIZE = 500;
 
 export interface InsertJobsBulkParams {
   rows: ValidJobRow[];
@@ -299,6 +322,8 @@ export interface InsertJobsBulkParams {
 export interface InsertJobsBulkResult {
   inserted: number;
   updated: number;
+  /** Rows whose signature matched an existing job (all fields identical — no DB write needed). */
+  unchanged: number;
   failed: RowError[];
   jobs_insert_batch_count: number;
   jobs_update_batch_count: number;
@@ -321,6 +346,7 @@ export async function insertJobsBulk({
 }: InsertJobsBulkParams): Promise<InsertJobsBulkResult> {
   let inserted = 0;
   let updated = 0;
+  let unchanged = 0;
   const failed: RowError[] = [];
   let insertBatchCount = 0;
   let updateBatchCount = 0;
@@ -362,7 +388,7 @@ export async function insertJobsBulk({
   const dates = [...new Set(payloads.map((p) => p.payload.job_date))];
   const existingJobs: Array<{
     id: string;
-    technician_id: string;
+    technician_id: string | null;
     job_date: string;
     revenue_estimate: number;
     duration_estimate_hours: number;
@@ -398,9 +424,10 @@ export async function insertJobsBulk({
     existingSigMap.set(sig, job.id);
   }
 
-  // 4. Split into inserts vs updates
+  // 4. Split into inserts vs unchanged
+  //    The signature includes ALL payload fields, so a match means the
+  //    existing row is identical — no UPDATE needed (skip as unchanged).
   const toInsert: Array<{ sourceRow: number; payload: JobPayload }> = [];
-  const toUpdate: Array<{ sourceRow: number; id: string; payload: JobPayload }> = [];
 
   for (const item of payloads) {
     const sig = [
@@ -412,9 +439,8 @@ export async function insertJobsBulk({
       item.payload.urgency,
     ].join("|");
 
-    const existingId = existingSigMap.get(sig);
-    if (existingId) {
-      toUpdate.push({ sourceRow: item.sourceRow, id: existingId, payload: item.payload });
+    if (existingSigMap.has(sig)) {
+      unchanged++;
     } else {
       toInsert.push(item);
     }
@@ -443,26 +469,10 @@ export async function insertJobsBulk({
     }
   }
 
-  // 6. Batched updates (individual updates since each has a different ID)
-  for (const batch of chunk(toUpdate, BATCH_SIZE)) {
-    updateBatchCount++;
-    for (const item of batch) {
-      const { error } = await db
-        .from("jobs")
-        .update(item.payload)
-        .eq("id", item.id);
-
-      if (error) {
-        failed.push({ row: item.sourceRow, message: error.message });
-      } else {
-        updated++;
-      }
-    }
-  }
-
   return {
     inserted,
     updated,
+    unchanged,
     failed,
     jobs_insert_batch_count: insertBatchCount,
     jobs_update_batch_count: updateBatchCount,
