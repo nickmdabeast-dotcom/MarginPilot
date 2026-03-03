@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import type { ParsedRow } from "@/lib/csv";
 import type { JobInput } from "@/lib/optimize";
+import { chunk } from "@/lib/utils";
 
 type DbClient = SupabaseClient<Database>;
 
@@ -281,6 +282,191 @@ export async function insertJobs({
   }
 
   return { inserted, updated, failed };
+}
+
+// ─── Bulk insert/update ───────────────────────────────────────────────────────
+
+const BATCH_SIZE = 200;
+
+export interface InsertJobsBulkParams {
+  rows: ValidJobRow[];
+  companyId: string;
+  db: DbClient;
+  /** Pre-resolved lowercase technician name → UUID map. */
+  techMap: Map<string, string>;
+}
+
+export interface InsertJobsBulkResult {
+  inserted: number;
+  updated: number;
+  failed: RowError[];
+  jobs_insert_batch_count: number;
+  jobs_update_batch_count: number;
+}
+
+/**
+ * Bulk-inserts or updates validated job rows using batched DB operations.
+ *
+ * Strategy:
+ *   1. Resolve technician IDs from the pre-built map.
+ *   2. Fetch existing jobs for this company+date range to detect duplicates.
+ *   3. Split rows into inserts vs updates.
+ *   4. Execute inserts and updates in batches of BATCH_SIZE.
+ */
+export async function insertJobsBulk({
+  rows,
+  companyId,
+  db,
+  techMap,
+}: InsertJobsBulkParams): Promise<InsertJobsBulkResult> {
+  let inserted = 0;
+  let updated = 0;
+  const failed: RowError[] = [];
+  let insertBatchCount = 0;
+  let updateBatchCount = 0;
+
+  // 1. Build payloads and resolve tech IDs
+  type JobPayload = {
+    company_id: string;
+    technician_id: string;
+    job_date: string;
+    revenue_estimate: number;
+    duration_estimate_hours: number;
+    urgency: number;
+  };
+  const payloads: Array<{ sourceRow: number; payload: JobPayload }> = [];
+
+  for (const row of rows) {
+    const techId = techMap.get(row.technician_name.toLowerCase().trim());
+    if (!techId) {
+      failed.push({
+        row: row.sourceRow,
+        message: `Technician "${row.technician_name}" could not be resolved`,
+      });
+      continue;
+    }
+    payloads.push({
+      sourceRow: row.sourceRow,
+      payload: {
+        company_id: companyId,
+        technician_id: techId,
+        job_date: row.schedule_date,
+        revenue_estimate: row.revenue,
+        duration_estimate_hours: row.duration_hours,
+        urgency: row.urgency,
+      },
+    });
+  }
+
+  // 2. Fetch existing jobs for the relevant dates to detect duplicates
+  const dates = [...new Set(payloads.map((p) => p.payload.job_date))];
+  const existingJobs: Array<{
+    id: string;
+    technician_id: string;
+    job_date: string;
+    revenue_estimate: number;
+    duration_estimate_hours: number;
+    urgency: number;
+  }> = [];
+
+  // Fetch in date chunks to avoid overly large queries
+  for (const dateChunk of chunk(dates, 10)) {
+    const { data, error } = await db
+      .from("jobs")
+      .select("id, technician_id, job_date, revenue_estimate, duration_estimate_hours, urgency")
+      .eq("company_id", companyId)
+      .in("job_date", dateChunk);
+
+    if (error) {
+      // Non-fatal: fall back to treating all as inserts
+      break;
+    }
+    if (data) existingJobs.push(...data);
+  }
+
+  // 3. Build a signature set from existing jobs for fast lookup
+  const existingSigMap = new Map<string, string>(); // signature → job id
+  for (const job of existingJobs) {
+    const sig = [
+      companyId,
+      job.technician_id,
+      job.job_date,
+      job.revenue_estimate,
+      job.duration_estimate_hours,
+      job.urgency,
+    ].join("|");
+    existingSigMap.set(sig, job.id);
+  }
+
+  // 4. Split into inserts vs updates
+  const toInsert: Array<{ sourceRow: number; payload: JobPayload }> = [];
+  const toUpdate: Array<{ sourceRow: number; id: string; payload: JobPayload }> = [];
+
+  for (const item of payloads) {
+    const sig = [
+      item.payload.company_id,
+      item.payload.technician_id,
+      item.payload.job_date,
+      item.payload.revenue_estimate,
+      item.payload.duration_estimate_hours,
+      item.payload.urgency,
+    ].join("|");
+
+    const existingId = existingSigMap.get(sig);
+    if (existingId) {
+      toUpdate.push({ sourceRow: item.sourceRow, id: existingId, payload: item.payload });
+    } else {
+      toInsert.push(item);
+    }
+  }
+
+  // 5. Batched inserts
+  for (const batch of chunk(toInsert, BATCH_SIZE)) {
+    insertBatchCount++;
+    const { data, error } = await db
+      .from("jobs")
+      .insert(batch.map((b) => b.payload))
+      .select("id");
+
+    if (error) {
+      // If batch insert fails, try individual inserts as fallback
+      for (const item of batch) {
+        const { error: singleErr } = await db.from("jobs").insert(item.payload);
+        if (singleErr) {
+          failed.push({ row: item.sourceRow, message: singleErr.message });
+        } else {
+          inserted++;
+        }
+      }
+    } else {
+      inserted += data?.length ?? batch.length;
+    }
+  }
+
+  // 6. Batched updates (individual updates since each has a different ID)
+  for (const batch of chunk(toUpdate, BATCH_SIZE)) {
+    updateBatchCount++;
+    for (const item of batch) {
+      const { error } = await db
+        .from("jobs")
+        .update(item.payload)
+        .eq("id", item.id);
+
+      if (error) {
+        failed.push({ row: item.sourceRow, message: error.message });
+      } else {
+        updated++;
+      }
+    }
+  }
+
+  return {
+    inserted,
+    updated,
+    failed,
+    jobs_insert_batch_count: insertBatchCount,
+    jobs_update_batch_count: updateBatchCount,
+  };
 }
 
 // ─── Fetching ─────────────────────────────────────────────────────────────────
