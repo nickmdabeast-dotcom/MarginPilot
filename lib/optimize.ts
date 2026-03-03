@@ -85,6 +85,26 @@ export interface DispatchTechAssignment {
   jobs: DispatchJobAssignment[];
 }
 
+/** Debug diagnostics — only populated when DEBUG_OPTIMIZER is enabled. */
+export interface OptimizerDebugInfo {
+  input_job_count: number;
+  input_tech_count: number;
+  baseline_score: number;   // total_revenue / total_hours
+  optimized_score: number;
+  changed_count: number;
+  changed_assignments: Array<{
+    job_id: string;
+    from_tech: string;
+    to_tech: string;
+  }>;
+  invariants: {
+    no_duplicate_jobs: boolean;
+    no_missing_jobs: boolean;
+    revenue_preserved: boolean;
+    duration_preserved: boolean;
+  };
+}
+
 export interface OptimizationResult {
   baseline: ScheduleSnapshot;
   optimized: ScheduleSnapshot;
@@ -96,6 +116,8 @@ export interface OptimizationResult {
    * Pass this to POST /api/dispatch/apply-optimization to persist to the jobs table.
    */
   dispatch_plan: DispatchTechAssignment[];
+  /** Debug info — only populated when DEBUG_OPTIMIZER env var is set. */
+  _debug?: OptimizerDebugInfo;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -417,7 +439,60 @@ export function optimizeJobs(jobs: JobInput[], averageHourlyLaborCost?: number):
   // ── Step 9: Build dispatch plan ────────────────────────────────────────────
   const dispatch_plan = buildDispatchPlan(slots);
 
-  return { baseline, optimized, delta, diagnostics, dispatch_plan };
+  const result: OptimizationResult = { baseline, optimized, delta, diagnostics, dispatch_plan };
+
+  // ── Debug diagnostics (guarded — zero cost in production) ──────────────
+  if (typeof process !== "undefined" && process.env?.DEBUG_OPTIMIZER === "1") {
+    result._debug = computeDebugInfo(jobs, baseline, optimized);
+  }
+
+  return result;
+}
+
+// ── Debug info builder ────────────────────────────────────────────────────
+
+/** Exported for direct use in tests — compares baseline vs optimized snapshots. */
+export function computeDebugInfo(
+  inputJobs: JobInput[],
+  baseline: ScheduleSnapshot,
+  optimized: ScheduleSnapshot,
+): OptimizerDebugInfo {
+  const inputIds = inputJobs.map((j) => j.id);
+  const optimizedIds = optimized.jobs.map((j) => j.id);
+
+  const baselineMap = new Map(baseline.jobs.map((j) => [j.id, j.technician_id]));
+  const optimizedMap = new Map(optimized.jobs.map((j) => [j.id, j.technician_id]));
+
+  const changed: OptimizerDebugInfo["changed_assignments"] = [];
+  for (const [id, fromTech] of baselineMap) {
+    const toTech = optimizedMap.get(id);
+    if (toTech && toTech !== fromTech) {
+      // Look up names for readability
+      const fromName = baseline.jobs.find((j) => j.id === id)?.technician_name ?? fromTech;
+      const toName = optimized.jobs.find((j) => j.id === id)?.technician_name ?? toTech;
+      changed.push({ job_id: id, from_tech: fromName, to_tech: toName });
+    }
+  }
+
+  const baselineTotalRev = round2(baseline.jobs.reduce((s, j) => s + j.revenue_estimate, 0));
+  const optimizedTotalRev = round2(optimized.jobs.reduce((s, j) => s + j.revenue_estimate, 0));
+  const baselineTotalHrs = round2(baseline.jobs.reduce((s, j) => s + j.duration_estimate_hours, 0));
+  const optimizedTotalHrs = round2(optimized.jobs.reduce((s, j) => s + j.duration_estimate_hours, 0));
+
+  return {
+    input_job_count: inputJobs.length,
+    input_tech_count: new Set(inputJobs.map((j) => j.technician_id)).size,
+    baseline_score: baselineTotalHrs > 0 ? round2(baselineTotalRev / baselineTotalHrs) : 0,
+    optimized_score: optimizedTotalHrs > 0 ? round2(optimizedTotalRev / optimizedTotalHrs) : 0,
+    changed_count: changed.length,
+    changed_assignments: changed.slice(0, 10),
+    invariants: {
+      no_duplicate_jobs: new Set(optimizedIds).size === optimizedIds.length,
+      no_missing_jobs: inputIds.every((id) => optimizedMap.has(id)),
+      revenue_preserved: baselineTotalRev === optimizedTotalRev,
+      duration_preserved: baselineTotalHrs === optimizedTotalHrs,
+    },
+  };
 }
 
 // ── Dispatch plan builder ─────────────────────────────────────────────────────

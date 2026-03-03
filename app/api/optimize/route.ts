@@ -55,6 +55,11 @@ export async function POST(req: NextRequest) {
     // 3. Run optimization engine
     const result = optimizeJobs(jobs, laborCost);
 
+    // Debug logging (guarded)
+    if (process.env.DEBUG_OPTIMIZER === "1" && result._debug) {
+      console.log("[optimizer] debug:", JSON.stringify(result._debug, null, 2));
+    }
+
     // 4. Persist run record (best-effort — don't fail the response if this errors)
     // Store the re-dated dispatch plan so apply-optimization can look it up by run_id.
     const { data: runRecord, error: insertError } = await db

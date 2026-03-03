@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   optimizeJobs,
+  computeDebugInfo,
   type JobInput,
   type OptimizationResult,
   type ScoredJob,
@@ -270,6 +271,58 @@ function DiagnosticChip({ icon, label, value, sub, status = "neutral", delay = 0
   );
 }
 
+// ─── OptimizerDebugPanel (dev-only) ──────────────────────────────────────────
+const SHOW_DEBUG = process.env.NEXT_PUBLIC_DEBUG_OPTIMIZER === "1" && process.env.NODE_ENV !== "production";
+
+function OptimizerDebugPanel({ result }: { result: OptimizationResult }) {
+  const [open, setOpen] = useState(false);
+  const debug = useMemo(
+    () => computeDebugInfo(result.baseline.jobs, result.baseline, result.optimized),
+    [result]
+  );
+
+  if (!SHOW_DEBUG) return null;
+
+  return (
+    <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 text-xs font-mono">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-4 py-2.5 text-yellow-300 hover:bg-yellow-500/10 transition-colors"
+      >
+        <span>Optimizer Debug — {debug.changed_count} changed · score {debug.baseline_score} → {debug.optimized_score}</span>
+        <span>{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-yellow-500/20 px-4 py-3 space-y-2 text-gray-300">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <span>Jobs in / out:</span><span>{debug.input_job_count} / {result.optimized.jobs.length}</span>
+            <span>Techs:</span><span>{debug.input_tech_count}</span>
+            <span>Baseline score:</span><span>{debug.baseline_score}</span>
+            <span>Optimized score:</span><span>{debug.optimized_score}</span>
+            <span>Changed count:</span><span className={debug.changed_count > 0 ? "text-yellow-300" : "text-emerald-400"}>{debug.changed_count}</span>
+          </div>
+          {debug.changed_assignments.length > 0 && (
+            <div className="mt-2">
+              <p className="text-gray-500 mb-1">Changed assignments (first 10):</p>
+              {debug.changed_assignments.map((c) => (
+                <div key={c.job_id} className="pl-2">
+                  {c.job_id}: <span className="text-red-400">{c.from_tech}</span> → <span className="text-emerald-400">{c.to_tech}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 text-gray-500">
+            Invariants: {Object.entries(debug.invariants).map(([k, v]) => (
+              <span key={k} className={`mr-2 ${v ? "text-emerald-400" : "text-red-400"}`}>{k.replace(/_/g, " ")}: {v ? "✓" : "✗"}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ResultsPanel ─────────────────────────────────────────────────────────────
 function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: boolean }) {
   const { baseline, optimized, delta, diagnostics } = result;
@@ -300,6 +353,9 @@ function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: 
         <span className={`h-1.5 w-1.5 rounded-full ${isDemo ? "bg-gray-500" : "bg-emerald-400"}`} />
         {isDemo ? "Demo data — upload a CSV to analyze your schedule" : "Live data — results from your uploaded schedule"}
       </div>
+
+      {/* Dev-only debug panel */}
+      <OptimizerDebugPanel result={result} />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

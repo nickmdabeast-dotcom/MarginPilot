@@ -1,0 +1,10 @@
+Tech,Job ID,Job Name,Revenue,Duration Hours,Urgency,Schedule Date
+Alice,J-101,AC Repair,$500,2,3,2026-03-10
+Alice,J-102,Thermostat Install,$500,2,3,2026-03-10
+Alice,J-103,Filter Change,$500,2,3,2026-03-10
+Bob,J-104,Duct Cleaning,$500,2,3,2026-03-10
+Bob,J-105,Furnace Check,$500,2,3,2026-03-10
+Bob,J-106,Vent Repair,$500,2,3,2026-03-10
+Carol,J-107,Compressor Service,$500,2,3,2026-03-10
+Carol,J-108,Drain Line Fix,$500,2,3,2026-03-10
+Carol,J-109,Heat Pump Tune,$500,2,3,2026-03-10
