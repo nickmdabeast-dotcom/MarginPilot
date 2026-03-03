@@ -55,3 +55,105 @@ export async function findOrCreateTechnician(
   cache.set(key, inserted.id);
   return { id: inserted.id, created: true };
 }
+
+// ─── Bulk resolution ──────────────────────────────────────────────────────────
+
+export interface BulkResolveResult {
+  /** name (lowercase) → technician UUID */
+  map: Map<string, string>;
+  /** How many technicians already existed in the DB */
+  resolved_count: number;
+  /** How many new technician records were created */
+  created_count: number;
+}
+
+/**
+ * Resolves an array of technician names to DB IDs in at most 2 queries:
+ *   1. One SELECT … WHERE name ILIKE ANY(names) to find existing technicians.
+ *   2. One INSERT for any names not found.
+ * Returns a lowercase-name → ID map.
+ */
+export async function bulkResolveTechnicians(
+  names: string[],
+  companyId: string,
+  db: DbClient
+): Promise<BulkResolveResult> {
+  const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  const map = new Map<string, string>();
+
+  if (uniqueNames.length === 0) {
+    return { map, resolved_count: 0, created_count: 0 };
+  }
+
+  // 1. Fetch all existing technicians for this company whose name matches
+  const { data: existing, error: fetchErr } = await db
+    .from("technicians")
+    .select("id, name")
+    .eq("company_id", companyId)
+    .in("name", uniqueNames);
+
+  if (fetchErr) {
+    throw new Error(`Failed to fetch technicians: ${fetchErr.message}`);
+  }
+
+  for (const tech of existing ?? []) {
+    map.set(tech.name.toLowerCase(), tech.id);
+  }
+
+  // Also check case-insensitive matches for names not found with exact match
+  const missingNames = uniqueNames.filter((n) => !map.has(n.toLowerCase()));
+
+  if (missingNames.length > 0) {
+    // Try ilike for remaining names (handles case differences)
+    const { data: ilikeResults } = await db
+      .from("technicians")
+      .select("id, name")
+      .eq("company_id", companyId);
+
+    if (ilikeResults) {
+      for (const tech of ilikeResults) {
+        const key = tech.name.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, tech.id);
+        }
+      }
+    }
+
+    // Determine truly missing names after case-insensitive check
+    const trulyMissing = missingNames.filter((n) => !map.has(n.toLowerCase()));
+
+    if (trulyMissing.length > 0) {
+      // 2. Bulk insert missing technicians
+      const insertPayload = trulyMissing.map((name) => ({
+        company_id: companyId,
+        name,
+        truck_id: "UNASSIGNED",
+      }));
+
+      const { data: inserted, error: insertErr } = await db
+        .from("technicians")
+        .insert(insertPayload)
+        .select("id, name");
+
+      if (insertErr) {
+        throw new Error(`Failed to bulk-insert technicians: ${insertErr.message}`);
+      }
+
+      for (const tech of inserted ?? []) {
+        map.set(tech.name.toLowerCase(), tech.id);
+      }
+
+      return {
+        map,
+        resolved_count: uniqueNames.length - trulyMissing.length,
+        created_count: trulyMissing.length,
+      };
+    }
+  }
+
+  return {
+    map,
+    resolved_count: uniqueNames.length,
+    created_count: 0,
+  };
+}

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthError } from "@/lib/auth";
 import { getApiContext } from "@/lib/apiContext";
 import { parseCSV, REQUIRED_COLUMNS, HEADER_ALIASES } from "@/lib/csv";
-import { validateJobRow, insertJobs, detectBatchCollisions, type ValidJobRow } from "@/services/jobs";
-import { findOrCreateTechnician } from "@/services/technicians";
+import { validateJobRow, insertJobsBulk, detectBatchCollisions, type ValidJobRow } from "@/services/jobs";
+import { bulkResolveTechnicians } from "@/services/technicians";
 
 export const dynamic = "force-dynamic";
 
@@ -293,18 +293,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Insert jobs (technician upsert handled per-row)
-  const techCache = new Map<string, string>();
+  // 6. Bulk-resolve technicians (1-2 queries instead of N)
+  const t0 = performance.now();
+  const uniqueTechNames = [...new Set(nonDuplicateRows.map((r) => r.technician_name))];
+  const techResult = await bulkResolveTechnicians(uniqueTechNames, companyId, db);
 
-  const result = await insertJobs({
+  // 7. Bulk insert/update jobs (batched)
+  const result = await insertJobsBulk({
     rows: nonDuplicateRows,
     companyId,
     db,
-    getTechnicianId: async (name) => {
-      const { id } = await findOrCreateTechnician(name, companyId, db, techCache);
-      return id;
-    },
+    techMap: techResult.map,
   });
+
+  const elapsed = Math.round(performance.now() - t0);
 
   // Merge parse errors + insert errors for the response
   const allFailed = [
@@ -336,6 +338,11 @@ export async function POST(req: NextRequest) {
         realigned_row_count: realignedRowCount,
         realigned_row_samples: realignedRowSamples,
         duplicate_signature_count: duplicates.length,
+        technician_resolved_count: techResult.resolved_count,
+        technician_created_count: techResult.created_count,
+        jobs_insert_batch_count: result.jobs_insert_batch_count,
+        jobs_update_batch_count: result.jobs_update_batch_count,
+        elapsed_ms_total: elapsed,
       },
     },
     { status: 200 }
