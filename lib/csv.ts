@@ -145,16 +145,43 @@ function hasRequiredColumn(
   return columns.has(required);
 }
 
-function alignValuesToHeaders(values: string[], canonicalHeaders: string[]): string[] {
+// ─── Currency pattern for realignment guard ─────────────────────────────────
+
+/** Matches currency-like values with thousands separators: $1,500 or 1,500.00 */
+const CURRENCY_WITH_COMMAS = /^\$?\d{1,3}(,\d{3})+(\.\d+)?$/;
+
+/**
+ * Only realign values when:
+ * 1. There is a column count mismatch (more values than headers)
+ * 2. Values around the revenue column match a currency pattern
+ */
+function alignValuesToHeaders(
+  values: string[],
+  canonicalHeaders: string[],
+  tracking: { realigned: boolean }
+): string[] {
   if (values.length <= canonicalHeaders.length) return values;
 
-  const aligned = [...values];
   const revenueIdx = canonicalHeaders.indexOf("revenue");
+  if (revenueIdx < 0) return values;
 
-  // Common broken CSV case: unquoted thousands separator in currency values.
-  while (aligned.length > canonicalHeaders.length && revenueIdx >= 0 && revenueIdx + 1 < aligned.length) {
-    aligned[revenueIdx] = `${aligned[revenueIdx]},${aligned[revenueIdx + 1]}`;
+  // Guard: only realign when the joined candidate looks like currency with commas
+  const aligned = [...values];
+  let didRealign = false;
+
+  while (aligned.length > canonicalHeaders.length && revenueIdx + 1 < aligned.length) {
+    const candidate = `${aligned[revenueIdx]},${aligned[revenueIdx + 1]}`;
+    if (!CURRENCY_WITH_COMMAS.test(candidate.replace(/^\$/, "").trim())) {
+      // Not a currency pattern — stop realigning to avoid false positives
+      break;
+    }
+    aligned[revenueIdx] = candidate;
     aligned.splice(revenueIdx + 1, 1);
+    didRealign = true;
+  }
+
+  if (didRealign) {
+    tracking.realigned = true;
   }
 
   return aligned;
@@ -199,8 +226,14 @@ export interface CSVParseResult {
   headerRaw: string[];
   headerNormalized: string[];
   headerCanonical: string[];
+  /** Maps each normalized header to the canonical alias that was applied (or null if none). */
+  aliasAppliedMap: Record<string, string | null>;
   delimiter: string;
   missingColumns: string[];
+  /** Number of data rows where column realignment was applied. */
+  realignedRowCount: number;
+  /** Up to 3 sample row indices (1-based) where realignment occurred. */
+  realignedRowSamples: number[];
 }
 
 /**
@@ -211,6 +244,7 @@ export interface CSVParseResult {
  *   canonical internal field names.
  * - Skips blank lines.
  * - Reports which required columns are absent.
+ * - Tracks column realignment statistics.
  */
 export function parseCSV(text: string): CSVParseResult {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -220,8 +254,11 @@ export function parseCSV(text: string): CSVParseResult {
       headerRaw: [],
       headerNormalized: [],
       headerCanonical: [],
+      aliasAppliedMap: {},
       delimiter: ",",
       missingColumns: Array.from(REQUIRED_COLUMNS),
+      realignedRowCount: 0,
+      realignedRowSamples: [],
     };
   }
 
@@ -232,12 +269,29 @@ export function parseCSV(text: string): CSVParseResult {
     (h) => HEADER_ALIASES[h] ?? h
   );
 
+  // Build alias traceability map: normalized → canonical (null if no alias matched)
+  const aliasAppliedMap: Record<string, string | null> = {};
+  for (const h of normalizedHeaders) {
+    aliasAppliedMap[h] = HEADER_ALIASES[h] ?? null;
+  }
+
   // Identify which required columns are missing from the header
   const canonicalSet = new Set(canonicalHeaders);
   const missingColumns = REQUIRED_COLUMNS.filter((c) => !hasRequiredColumn(c, canonicalSet));
 
-  const rows: ParsedRow[] = lines.slice(1).map((line) => {
-    const values = alignValuesToHeaders(parseCSVRow(line, delimiter), canonicalHeaders);
+  // Track realignment
+  let realignedRowCount = 0;
+  const realignedRowSamples: number[] = [];
+
+  const rows: ParsedRow[] = lines.slice(1).map((line, idx) => {
+    const tracking = { realigned: false };
+    const values = alignValuesToHeaders(parseCSVRow(line, delimiter), canonicalHeaders, tracking);
+    if (tracking.realigned) {
+      realignedRowCount++;
+      if (realignedRowSamples.length < 3) {
+        realignedRowSamples.push(idx + 2); // 1-based, header is row 1
+      }
+    }
     return Object.fromEntries(
       canonicalHeaders.map((h, i) => [h, values[i] ?? ""])
     );
@@ -248,7 +302,10 @@ export function parseCSV(text: string): CSVParseResult {
     headerRaw: rawHeaders,
     headerNormalized: normalizedHeaders,
     headerCanonical: canonicalHeaders,
+    aliasAppliedMap,
     delimiter,
     missingColumns,
+    realignedRowCount,
+    realignedRowSamples,
   };
 }

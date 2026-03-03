@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 import { parseCSV, REQUIRED_COLUMNS, HEADER_ALIASES } from "@/lib/csv";
-import { validateJobRow, insertJobs, type ValidJobRow } from "@/services/jobs";
+import { validateJobRow, insertJobs, detectBatchCollisions, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
 
 export const dynamic = "force-dynamic";
@@ -102,11 +102,15 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Parse CSV (includes header normalization + alias mapping)
-  const { rows, headerRaw, headerNormalized, headerCanonical, missingColumns } = parseCSV(csvText);
+  const {
+    rows, headerRaw, headerNormalized, headerCanonical,
+    aliasAppliedMap, missingColumns, realignedRowCount, realignedRowSamples,
+  } = parseCSV(csvText);
   debugLog("headers", {
     raw: headerRaw,
     normalized: headerNormalized,
     canonical: headerCanonical,
+    aliasAppliedMap,
   });
   debugLog("parsedRowCount", rows.length);
   debugLog("sampleRows", rows.slice(0, 3).map((row) => sanitizeRow(row)));
@@ -154,7 +158,9 @@ export async function POST(req: NextRequest) {
           // new diagnostic fields
           headers_raw: headerRaw,
           headers_normalized: headerNormalized,
+          alias_applied_map: aliasAppliedMap,
           header_map: headerMap,
+          final_mapped_headers: headerCanonical,
           rows_total: rows.length,
           rows_valid: 0,
           rows_rejected: rows.length,
@@ -162,6 +168,9 @@ export async function POST(req: NextRequest) {
             [`missing_columns:${effectiveMissing.join(",")}`]: rows.length,
           },
           rejected_rows_sample: [],
+          realigned_row_count: realignedRowCount,
+          realigned_row_samples: realignedRowSamples,
+          duplicate_signature_count: 0,
         },
       },
       { status: 400 }
@@ -213,12 +222,71 @@ export async function POST(req: NextRequest) {
           // new diagnostic fields
           headers_raw: headerRaw,
           headers_normalized: headerNormalized,
+          alias_applied_map: aliasAppliedMap,
           header_map: headerMap,
+          final_mapped_headers: headerCanonical,
           rows_total: rows.length,
           rows_valid: 0,
           rows_rejected: parseErrors.length,
           rejection_reasons_summary: rejectionReasonsSummary,
           rejected_rows_sample: rejectedRowSamples,
+          realigned_row_count: realignedRowCount,
+          realigned_row_samples: realignedRowSamples,
+          duplicate_signature_count: 0,
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  // 5b. Detect signature collisions within the upload batch
+  const { unique: nonDuplicateRows, duplicates } = detectBatchCollisions(validRows);
+
+  for (const dup of duplicates) {
+    const reason = "duplicate_signature_in_upload";
+    parseErrors.push({ row: dup.row.sourceRow, reason });
+    rejectionReasonsSummary[reason] = (rejectionReasonsSummary[reason] ?? 0) + 1;
+    if (rejectedRowSamples.length < 10) {
+      rejectedRowSamples.push({
+        row_index: dup.row.sourceRow,
+        reasons: [reason],
+        data: {
+          technician_name: dup.row.technician_name,
+          schedule_date: dup.row.schedule_date,
+          revenue: String(dup.row.revenue),
+          duration_hours: String(dup.row.duration_hours),
+          urgency: String(dup.row.urgency),
+        },
+      });
+    }
+  }
+
+  if (nonDuplicateRows.length === 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "No valid rows found after collision detection",
+        details: {
+          parsedRowCount: rows.length,
+          headerRaw,
+          headerNormalized,
+          headerCanonical,
+          requiredColumns: Array.from(REQUIRED_COLUMNS),
+          missingColumns,
+          sampleRejections: parseErrors.slice(0, 10),
+          headers_raw: headerRaw,
+          headers_normalized: headerNormalized,
+          alias_applied_map: aliasAppliedMap,
+          header_map: headerMap,
+          final_mapped_headers: headerCanonical,
+          rows_total: rows.length,
+          rows_valid: 0,
+          rows_rejected: parseErrors.length,
+          rejection_reasons_summary: rejectionReasonsSummary,
+          rejected_rows_sample: rejectedRowSamples,
+          realigned_row_count: realignedRowCount,
+          realigned_row_samples: realignedRowSamples,
+          duplicate_signature_count: duplicates.length,
         },
       },
       { status: 400 }
@@ -229,7 +297,7 @@ export async function POST(req: NextRequest) {
   const techCache = new Map<string, string>();
 
   const result = await insertJobs({
-    rows: validRows,
+    rows: nonDuplicateRows,
     companyId,
     db,
     getTechnicianId: async (name) => {
@@ -257,12 +325,17 @@ export async function POST(req: NextRequest) {
       diagnostics: {
         headers_raw: headerRaw,
         headers_normalized: headerNormalized,
+        alias_applied_map: aliasAppliedMap,
         header_map: headerMap,
+        final_mapped_headers: headerCanonical,
         rows_total: rows.length,
-        rows_valid: validRows.length,
+        rows_valid: nonDuplicateRows.length,
         rows_rejected: parseErrors.length,
         rejection_reasons_summary: rejectionReasonsSummary,
         rejected_rows_sample: rejectedRowSamples,
+        realigned_row_count: realignedRowCount,
+        realigned_row_samples: realignedRowSamples,
+        duplicate_signature_count: duplicates.length,
       },
     },
     { status: 200 }
