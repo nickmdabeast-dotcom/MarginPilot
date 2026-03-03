@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 // ─── PATCH /api/leads/:id ────────────────────────────────────────────────────
-// Body: { status: string, company_id: string }
-// Updates the status of a lead.
+// Body: { status: string }
+// Updates the status of a lead. company_id derived from session.
 //
 // Returns: { success: true }
 //       or { success: false, error: string }
@@ -15,6 +18,8 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const db = createServerClient();
+    const { companyId } = await requireCompanyId(db);
     const { id } = params;
 
     let body: unknown;
@@ -34,14 +39,7 @@ export async function PATCH(
       );
     }
 
-    const { status, company_id } = body as Record<string, unknown>;
-
-    if (!company_id || typeof company_id !== "string") {
-      return NextResponse.json(
-        { success: false, error: "company_id is required" },
-        { status: 400 }
-      );
-    }
+    const { status } = body as Record<string, unknown>;
 
     if (!status || typeof status !== "string" || !VALID_STATUSES.has(status)) {
       return NextResponse.json(
@@ -50,13 +48,11 @@ export async function PATCH(
       );
     }
 
-    const db = createServerClient();
-
     const { error, count } = await db
       .from("leads")
       .update({ status })
       .eq("id", id)
-      .eq("company_id", company_id);
+      .eq("company_id", companyId);
 
     if (error) {
       return NextResponse.json(
@@ -72,6 +68,13 @@ export async function PATCH(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    if (isAuthError(err)) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status }
+      );
+    }
+
     console.error("[/api/leads/:id PATCH] Unhandled error:", err);
     return NextResponse.json(
       {

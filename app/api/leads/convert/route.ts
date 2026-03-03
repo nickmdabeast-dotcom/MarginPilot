@@ -5,7 +5,7 @@ import { createServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 // ─── POST /api/leads/convert ──────────────────────────────────────────────────
-// Converts a lead into a scheduled job.
+// Converts a lead into a scheduled job. company_id derived from session.
 //
 // Body: {
 //   lead_id: string,

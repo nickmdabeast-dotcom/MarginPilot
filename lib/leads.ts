@@ -1,7 +1,5 @@
 // ─── Client-side fetch layer for Leads ──────────────────────────────────────
 
-import { DEMO_COMPANY_ID } from "@/lib/constants";
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface LeadCustomer {
@@ -113,7 +111,6 @@ export async function fetchLeads(
   signal?: AbortSignal
 ): Promise<ApiResult<Lead[]>> {
   const url = new URL("/api/leads", window.location.origin);
-  url.searchParams.set("company_id", DEMO_COMPANY_ID);
   if (params.status) url.searchParams.set("status", params.status);
 
   try {
@@ -155,7 +152,7 @@ export async function createLead(
     const res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, company_id: DEMO_COMPANY_ID }),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
 
@@ -179,7 +176,7 @@ export async function convertLeadToJob(
     const res = await fetch("/api/leads/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, company_id: DEMO_COMPANY_ID }),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
 
@@ -205,7 +202,7 @@ export async function updateLeadStatus(
     const res = await fetch(`/api/leads/${leadId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, company_id: DEMO_COMPANY_ID }),
+      body: JSON.stringify({ status }),
     });
     const json = await res.json();
 
