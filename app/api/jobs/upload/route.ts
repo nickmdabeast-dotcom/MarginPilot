@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthError, requireCompanyId } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase/server";
+import { isAuthError } from "@/lib/auth";
+import { getApiContext } from "@/lib/apiContext";
 import { parseCSV, REQUIRED_COLUMNS, HEADER_ALIASES } from "@/lib/csv";
 import { validateJobRow, insertJobs, detectBatchCollisions, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
@@ -39,12 +39,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function POST(req: NextRequest) {
   // 0. Require auth + company context first
-  let db: ReturnType<typeof createServerClient>;
+  let db: Awaited<ReturnType<typeof getApiContext>>["db"];
   let companyId: string;
   try {
-    db = createServerClient();
-    const authContext = await requireCompanyId(db);
-    companyId = authContext.companyId;
+    const ctx = await getApiContext();
+    db = ctx.db;
+    companyId = ctx.companyId;
   } catch (err) {
     if (isAuthError(err)) {
       return NextResponse.json(

@@ -103,6 +103,18 @@ export interface OptimizerDebugInfo {
     revenue_preserved: boolean;
     duration_preserved: boolean;
   };
+  // ── Before / After / Delta metrics ──
+  total_revenue_before: number;
+  total_revenue_after: number;
+  revenue_per_hour_before: number;
+  revenue_per_hour_after: number;
+  revenue_per_hour_delta: number;
+  overtime_tech_count_before: number;
+  overtime_tech_count_after: number;
+  overtime_tech_count_delta: number;
+  workload_variance_before: number;
+  workload_variance_after: number;
+  workload_variance_delta: number;
 }
 
 export interface OptimizationResult {
@@ -492,6 +504,18 @@ export function computeDebugInfo(
       revenue_preserved: baselineTotalRev === optimizedTotalRev,
       duration_preserved: baselineTotalHrs === optimizedTotalHrs,
     },
+    // Before / After / Delta metrics
+    total_revenue_before: baseline.total_revenue,
+    total_revenue_after: optimized.total_revenue,
+    revenue_per_hour_before: baseline.revenue_per_hour,
+    revenue_per_hour_after: optimized.revenue_per_hour,
+    revenue_per_hour_delta: round2(optimized.revenue_per_hour - baseline.revenue_per_hour),
+    overtime_tech_count_before: baseline.overtime_tech_count,
+    overtime_tech_count_after: optimized.overtime_tech_count,
+    overtime_tech_count_delta: optimized.overtime_tech_count - baseline.overtime_tech_count,
+    workload_variance_before: baseline.workload_variance,
+    workload_variance_after: optimized.workload_variance,
+    workload_variance_delta: round2(optimized.workload_variance - baseline.workload_variance),
   };
 }
 

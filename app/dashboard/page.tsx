@@ -323,6 +323,76 @@ function OptimizerDebugPanel({ result }: { result: OptimizationResult }) {
   );
 }
 
+// ─── OptimizationImpactPanel (dev-only) ──────────────────────────────────────
+const SHOW_IMPACT = process.env.NEXT_PUBLIC_DEBUG_OPTIMIZER_UI === "1" || (process.env.NODE_ENV !== "production" && SHOW_DEBUG);
+
+function ImpactRow({ label, before, after, delta, unit = "" }: {
+  label: string; before: string; after: string; delta: string; unit?: string;
+}) {
+  const isPositive = delta.startsWith("+");
+  const isNegative = delta.startsWith("-");
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <span className="text-gray-400">{label}</span>
+      <div className="flex items-center gap-2 font-mono">
+        <span className="text-gray-500">{before}{unit}</span>
+        <span className="text-gray-700">&rarr;</span>
+        <span className="text-white">{after}{unit}</span>
+        <span className={`text-xs ${isPositive ? "text-emerald-400" : isNegative ? "text-red-400" : "text-gray-600"}`}>
+          ({delta}{unit})
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OptimizationImpactPanel({ result }: { result: OptimizationResult }) {
+  const debug = useMemo(
+    () => computeDebugInfo(result.baseline.jobs, result.baseline, result.optimized),
+    [result]
+  );
+
+  if (!SHOW_IMPACT) return null;
+
+  const fmtDelta = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+
+  return (
+    <motion.div
+      className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 text-xs font-mono"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <Activity className="h-3.5 w-3.5 text-cyan-400" />
+        <span className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">Optimization Impact</span>
+        <span className="ml-auto text-gray-600">dev only</span>
+      </div>
+      <div className="divide-y divide-cyan-500/10">
+        <ImpactRow
+          label="Revenue/hr"
+          before={`$${debug.revenue_per_hour_before.toFixed(2)}`}
+          after={`$${debug.revenue_per_hour_after.toFixed(2)}`}
+          delta={fmtDelta(debug.revenue_per_hour_delta)}
+        />
+        <ImpactRow
+          label="Overtime techs"
+          before={String(debug.overtime_tech_count_before)}
+          after={String(debug.overtime_tech_count_after)}
+          delta={fmtDelta(debug.overtime_tech_count_delta)}
+        />
+        <ImpactRow
+          label="Workload variance"
+          before={debug.workload_variance_before.toFixed(2)}
+          after={debug.workload_variance_after.toFixed(2)}
+          delta={fmtDelta(debug.workload_variance_delta)}
+          unit="h"
+        />
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── ResultsPanel ─────────────────────────────────────────────────────────────
 function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: boolean }) {
   const { baseline, optimized, delta, diagnostics } = result;
@@ -356,6 +426,9 @@ function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: 
 
       {/* Dev-only debug panel */}
       <OptimizerDebugPanel result={result} />
+
+      {/* Dev-only optimization impact panel */}
+      <OptimizationImpactPanel result={result} />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthError, requireCompanyId } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase/server";
+import { isAuthError } from "@/lib/auth";
+import { getApiContext } from "@/lib/apiContext";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +48,7 @@ function today(): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const db = createServerClient();
-    const { companyId } = await requireCompanyId(db);
+    const { db, companyId } = await getApiContext();
 
     const { searchParams } = new URL(req.url);
     const date = searchParams.get("date") ?? today();

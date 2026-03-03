@@ -8,7 +8,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { optimizeJobs, type JobInput } from "../lib/optimize.js";
+import { optimizeJobs, computeDebugInfo, type JobInput } from "../lib/optimize.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,5 +132,66 @@ describe("optimizeJobs", () => {
     const result = optimizeJobs(jobs);
     assert.equal(result.optimized.technicians.length, 1);
     assert.equal(result.optimized.jobs.length, 2);
+  });
+});
+
+// ── computeDebugInfo before/after/delta metrics ─────────────────────────────
+
+describe("computeDebugInfo – impact metrics", () => {
+  it("populates before/after/delta for revenue_per_hour, overtime, and variance", () => {
+    // Imbalanced baseline: t1 has 9h, t2 has 1h → optimizer should rebalance
+    const jobs: JobInput[] = [
+      makeJob({ id: "j1", technician_id: "t1", technician_name: "A", duration_estimate_hours: 5, revenue_estimate: 500 }),
+      makeJob({ id: "j2", technician_id: "t1", technician_name: "A", duration_estimate_hours: 4, revenue_estimate: 400 }),
+      makeJob({ id: "j3", technician_id: "t2", technician_name: "B", duration_estimate_hours: 1, revenue_estimate: 100 }),
+    ];
+
+    const result = optimizeJobs(jobs);
+    const debug = computeDebugInfo(jobs, result.baseline, result.optimized);
+
+    // Revenue totals must match (optimizer only reassigns, never drops jobs)
+    assert.equal(debug.total_revenue_before, debug.total_revenue_after);
+
+    // Before/after fields exist and are numbers
+    assert.equal(typeof debug.revenue_per_hour_before, "number");
+    assert.equal(typeof debug.revenue_per_hour_after, "number");
+    assert.equal(typeof debug.revenue_per_hour_delta, "number");
+    assert.equal(typeof debug.overtime_tech_count_before, "number");
+    assert.equal(typeof debug.overtime_tech_count_after, "number");
+    assert.equal(typeof debug.overtime_tech_count_delta, "number");
+    assert.equal(typeof debug.workload_variance_before, "number");
+    assert.equal(typeof debug.workload_variance_after, "number");
+    assert.equal(typeof debug.workload_variance_delta, "number");
+
+    // Delta = after - before
+    assert.equal(
+      debug.revenue_per_hour_delta,
+      Math.round((debug.revenue_per_hour_after - debug.revenue_per_hour_before) * 100) / 100
+    );
+    assert.equal(
+      debug.overtime_tech_count_delta,
+      debug.overtime_tech_count_after - debug.overtime_tech_count_before
+    );
+    assert.equal(
+      debug.workload_variance_delta,
+      Math.round((debug.workload_variance_after - debug.workload_variance_before) * 100) / 100
+    );
+
+    // Baseline had t1 at 9h (OT) — optimizer should reduce or maintain OT
+    assert.ok(debug.overtime_tech_count_before >= 1, "baseline should have at least 1 OT tech");
+    assert.ok(debug.overtime_tech_count_after <= debug.overtime_tech_count_before, "optimizer should not increase OT");
+  });
+
+  it("returns zero deltas for a single-tech single-job scenario", () => {
+    const jobs: JobInput[] = [
+      makeJob({ id: "j1", technician_id: "t1", technician_name: "Solo" }),
+    ];
+    const result = optimizeJobs(jobs);
+    const debug = computeDebugInfo(jobs, result.baseline, result.optimized);
+
+    assert.equal(debug.revenue_per_hour_delta, 0);
+    assert.equal(debug.overtime_tech_count_delta, 0);
+    assert.equal(debug.workload_variance_delta, 0);
+    assert.equal(debug.changed_count, 0);
   });
 });

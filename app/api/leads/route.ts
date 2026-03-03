@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthError, requireCompanyId } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase/server";
+import { isAuthError } from "@/lib/auth";
+import { getApiContext } from "@/lib/apiContext";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +20,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const db = createServerClient();
-    const { companyId } = await requireCompanyId(db);
+    const { db, companyId } = await getApiContext();
 
     let body: unknown;
     try {
@@ -118,8 +117,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const db = createServerClient();
-    const { companyId } = await requireCompanyId(db);
+    const { db, companyId } = await getApiContext();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
