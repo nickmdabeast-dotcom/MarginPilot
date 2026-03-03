@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthError, requireCompanyId } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase/server";
-import { parseCSV, REQUIRED_COLUMNS } from "@/lib/csv";
+import { parseCSV, REQUIRED_COLUMNS, HEADER_ALIASES } from "@/lib/csv";
 import { validateJobRow, insertJobs, type ValidJobRow } from "@/services/jobs";
 import { findOrCreateTechnician } from "@/services/technicians";
 
@@ -111,6 +111,12 @@ export async function POST(req: NextRequest) {
   debugLog("parsedRowCount", rows.length);
   debugLog("sampleRows", rows.slice(0, 3).map((row) => sanitizeRow(row)));
 
+  // Build header_map: normalized header → canonical field name (null if unrecognized)
+  const headerMap: Record<string, string | null> = {};
+  for (const h of headerNormalized) {
+    headerMap[h] = HEADER_ALIASES[h] ?? null;
+  }
+
   if (rows.length === 0) {
     return NextResponse.json(
       { success: false, error: "CSV has no data rows (only header or empty)" },
@@ -137,6 +143,7 @@ export async function POST(req: NextRequest) {
         success: false,
         error: "CSV is missing required columns",
         details: {
+          // backward-compat fields
           parsedRowCount: rows.length,
           headerRaw,
           headerNormalized,
@@ -144,6 +151,17 @@ export async function POST(req: NextRequest) {
           requiredColumns: Array.from(REQUIRED_COLUMNS),
           missingColumns: effectiveMissing,
           sampleRejections: [],
+          // new diagnostic fields
+          headers_raw: headerRaw,
+          headers_normalized: headerNormalized,
+          header_map: headerMap,
+          rows_total: rows.length,
+          rows_valid: 0,
+          rows_rejected: rows.length,
+          rejection_reasons_summary: {
+            [`missing_columns:${effectiveMissing.join(",")}`]: rows.length,
+          },
+          rejected_rows_sample: [],
         },
       },
       { status: 400 }
@@ -153,6 +171,7 @@ export async function POST(req: NextRequest) {
   // 5. Validate each row
   const validRows: ValidJobRow[] = [];
   const parseErrors: Array<{ row: number; reason: string }> = [];
+  const rejectedRowSamples: Array<{ row_index: number; reasons: string[]; data: Record<string, string> }> = [];
 
   for (let i = 0; i < rows.length; i++) {
     const result = validateJobRow(rows[i], i + 2, dateFallback); // +2: header is row 1
@@ -160,13 +179,21 @@ export async function POST(req: NextRequest) {
       validRows.push(result.data);
     } else {
       parseErrors.push({ row: result.error.row, reason: result.error.message });
-      if (parseErrors.length <= 10) {
-        debugLog("rowRejected", {
-          row: result.error.row,
-          reason: result.error.message,
+      debugLog("rowRejected", { row: result.error.row, reason: result.error.message });
+      if (rejectedRowSamples.length < 10) {
+        rejectedRowSamples.push({
+          row_index: result.error.row,
+          reasons: [result.error.message],
+          data: sanitizeRow(rows[i]),
         });
       }
     }
+  }
+
+  // Compute rejection reasons summary
+  const rejectionReasonsSummary: Record<string, number> = {};
+  for (const e of parseErrors) {
+    rejectionReasonsSummary[e.reason] = (rejectionReasonsSummary[e.reason] ?? 0) + 1;
   }
 
   if (validRows.length === 0) {
@@ -175,6 +202,7 @@ export async function POST(req: NextRequest) {
         success: false,
         error: "No valid rows found in CSV",
         details: {
+          // backward-compat fields
           parsedRowCount: rows.length,
           headerRaw,
           headerNormalized,
@@ -182,6 +210,15 @@ export async function POST(req: NextRequest) {
           requiredColumns: Array.from(REQUIRED_COLUMNS),
           missingColumns,
           sampleRejections: parseErrors.slice(0, 10),
+          // new diagnostic fields
+          headers_raw: headerRaw,
+          headers_normalized: headerNormalized,
+          header_map: headerMap,
+          rows_total: rows.length,
+          rows_valid: 0,
+          rows_rejected: parseErrors.length,
+          rejection_reasons_summary: rejectionReasonsSummary,
+          rejected_rows_sample: rejectedRowSamples,
         },
       },
       { status: 400 }
@@ -217,6 +254,16 @@ export async function POST(req: NextRequest) {
       warnings: allFailed.length > 0
         ? [`${allFailed.length} row(s) skipped — see "failed" for details`]
         : [],
+      diagnostics: {
+        headers_raw: headerRaw,
+        headers_normalized: headerNormalized,
+        header_map: headerMap,
+        rows_total: rows.length,
+        rows_valid: validRows.length,
+        rows_rejected: parseErrors.length,
+        rejection_reasons_summary: rejectionReasonsSummary,
+        rejected_rows_sample: rejectedRowSamples,
+      },
     },
     { status: 200 }
   );
