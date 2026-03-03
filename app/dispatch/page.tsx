@@ -34,11 +34,11 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 };
 
 const STATUS_COLORS: Record<JobStatus, string> = {
-  scheduled: "bg-blue-100 text-blue-800",
-  en_route: "bg-yellow-100 text-yellow-800",
-  on_site: "bg-orange-100 text-orange-800",
-  completed: "bg-green-100 text-green-800",
-  canceled: "bg-gray-100 text-gray-500 line-through",
+  scheduled: "bg-blue-400/15 text-blue-400",
+  en_route: "bg-yellow-400/15 text-yellow-400",
+  on_site: "bg-orange-400/15 text-orange-400",
+  completed: "bg-emerald-400/15 text-emerald-400",
+  canceled: "bg-gray-400/15 text-gray-500 line-through",
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,34 +99,34 @@ function JobCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm select-none"
+      className="border border-white/10 bg-white/5 rounded-lg p-3 backdrop-blur-sm select-none"
     >
       {/* Drag handle */}
       <div
         {...attributes}
         {...listeners}
-        className="cursor-grab active:cursor-grabbing text-gray-400 mb-2 text-xs font-mono"
+        className="cursor-grab active:cursor-grabbing text-gray-500 mb-2 text-xs font-mono"
         title="Drag to reorder"
       >
         ⠿
       </div>
 
-      <div className="font-medium text-sm text-gray-900 truncate">
+      <div className="font-medium text-sm text-white truncate">
         {job.customer_name ?? "No customer"}
       </div>
 
       {job.status !== "canceled" && (
-        <div className="text-xs text-gray-500 mt-0.5 truncate">
+        <div className="text-xs text-gray-400 mt-0.5 truncate">
           {job.duration_estimate_hours > 0 && <span>{durationLabel}</span>}
           {job.scheduled_start && (
-            <span className="ml-1 text-gray-400">· {formatTime(job.scheduled_start)}</span>
+            <span className="ml-1 text-gray-500">· {formatTime(job.scheduled_start)}</span>
           )}
         </div>
       )}
 
       {/* Revenue */}
       {job.revenue_estimate > 0 && (
-        <div className="text-xs text-emerald-600 mt-1">${job.revenue_estimate.toFixed(0)}</div>
+        <div className="text-xs text-emerald-400 mt-1">${job.revenue_estimate.toFixed(0)}</div>
       )}
 
       {/* Status dropdown */}
@@ -134,10 +134,10 @@ function JobCard({
         value={job.status}
         onChange={(e) => onStatusChange(job.id, e.target.value)}
         onClick={(e) => e.stopPropagation()}
-        className={`mt-2 w-full text-xs rounded px-1.5 py-1 border-0 font-medium cursor-pointer ${STATUS_COLORS[status] ?? "bg-gray-100 text-gray-700"}`}
+        className={`mt-2 w-full text-xs rounded px-1.5 py-1 border border-white/10 font-medium cursor-pointer bg-white/5 ${STATUS_COLORS[status] ?? "bg-white/5 text-gray-400"}`}
       >
         {JOB_STATUSES.map((s) => (
-          <option key={s} value={s}>
+          <option key={s} value={s} className="bg-slate-900 text-white">
             {STATUS_LABELS[s]}
           </option>
         ))}
@@ -167,25 +167,25 @@ function TechColumn({
     <div className="flex flex-col w-56 shrink-0">
       {/* Column header */}
       <div className="mb-2 px-1">
-        <div className="font-semibold text-sm text-gray-800 truncate">
+        <div className="font-semibold text-sm text-white truncate">
           {tech?.name ?? "Unassigned"}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           {tech?.truck_id && tech.truck_id !== "UNASSIGNED" && (
-            <span className="text-xs text-gray-400">{tech.truck_id}</span>
+            <span className="text-xs text-gray-500">{tech.truck_id}</span>
           )}
-          <span className={`text-xs ${isOvertime ? "text-red-600 font-medium" : "text-gray-400"}`}>
+          <span className={`text-xs ${isOvertime ? "text-orange-400 font-medium" : "text-gray-500"}`}>
             {totalHours.toFixed(1)}h
             {isOvertime && " ⚠"}
           </span>
-          <span className="text-xs text-gray-400">({jobs.length})</span>
+          <span className="text-xs text-gray-500">({jobs.length})</span>
         </div>
       </div>
 
       {/* Drop zone */}
       <div
         data-tech-id={techId}
-        className="flex-1 min-h-32 bg-gray-50 rounded-lg p-2 flex flex-col gap-2"
+        className="flex-1 min-h-32 bg-white/5 rounded-lg p-2 flex flex-col gap-2 border border-white/10"
       >
         <SortableContext items={jobIds} strategy={verticalListSortingStrategy}>
           {jobs.map((job) => (
@@ -198,7 +198,7 @@ function TechColumn({
         </SortableContext>
 
         {jobs.length === 0 && (
-          <div className="flex-1 flex items-center justify-center text-xs text-gray-400 italic">
+          <div className="flex-1 flex items-center justify-center text-xs text-gray-500 italic">
             Drop jobs here
           </div>
         )}
@@ -363,39 +363,37 @@ export default function DispatchPage() {
   const unassignedJobs = getJobsForTech(null);
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between max-w-full">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Dispatch Board</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Drag jobs between technicians to reassign</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <button
-              onClick={() => fetchDispatch(date)}
-              className="text-sm px-3 py-1.5 bg-gray-900 text-white rounded hover:bg-gray-700"
-            >
-              Refresh
-            </button>
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Dispatch Board</h1>
+          <p className="mt-1 text-sm text-gray-500">Drag jobs between technicians to reassign</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
+          />
+          <button
+            onClick={() => fetchDispatch(date)}
+            className="text-sm px-4 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
       {/* Body */}
-      <div className="px-6 py-4">
+      <div>
         {loading && (
-          <div className="text-sm text-gray-500 py-8 text-center">Loading...</div>
+          <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
         )}
 
         {!loading && error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-4 my-4">
+          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-4 my-4">
             {error}
           </div>
         )}
@@ -433,11 +431,11 @@ export default function DispatchPage() {
             {/* Drag overlay — ghost card */}
             <DragOverlay>
               {activeJob ? (
-                <div className="bg-white border border-blue-400 rounded-lg p-3 shadow-lg w-56 opacity-90">
-                  <div className="font-medium text-sm text-gray-900 truncate">
+                <div className="border border-blue-500/40 bg-slate-800 rounded-lg p-3 shadow-lg w-56 opacity-90">
+                  <div className="font-medium text-sm text-white truncate">
                     {activeJob.customer_name ?? "No customer"}
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                  <div className="text-xs text-gray-400 mt-0.5">
                     {activeJob.duration_estimate_hours}h
                   </div>
                 </div>
@@ -447,11 +445,11 @@ export default function DispatchPage() {
         )}
 
         {!loading && !error && technicians.length === 0 && (
-          <div className="text-sm text-gray-400 text-center py-16">
+          <div className="text-sm text-gray-500 text-center py-16">
             No technicians found for this company.
             <br />
             Upload a CSV on the{" "}
-            <a href="/dashboard" className="underline text-blue-500">
+            <a href="/dashboard" className="underline text-blue-400 hover:text-blue-300">
               dashboard
             </a>{" "}
             to create technicians.

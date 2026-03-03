@@ -76,6 +76,7 @@ export function UploadCSV({ onSuccess }: UploadCSVProps) {
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("date", date);
 
       const res = await fetch("/api/jobs/upload", {
         method: "POST",

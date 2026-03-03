@@ -71,6 +71,7 @@ export async function POST(req: NextRequest) {
   }
 
   const file = formData.get("file");
+  const fallbackDate = formData.get("date");
 
   if (!file || typeof file === "string") {
     return NextResponse.json(
@@ -137,9 +138,10 @@ export async function POST(req: NextRequest) {
   // 5. Validate each row
   const validRows: ValidJobRow[] = [];
   const parseErrors: Array<{ row: number; reason: string }> = [];
+  const dateFallback = typeof fallbackDate === "string" ? fallbackDate.trim() || undefined : undefined;
 
   for (let i = 0; i < rows.length; i++) {
-    const result = validateJobRow(rows[i], i + 2); // +2: header is row 1
+    const result = validateJobRow(rows[i], i + 2, dateFallback); // +2: header is row 1
     if (result.ok) {
       validRows.push(result.data);
     } else {

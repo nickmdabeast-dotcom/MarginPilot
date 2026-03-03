@@ -1,6 +1,6 @@
 // ─── Client-side fetch layer for Leads ──────────────────────────────────────
 
-const DEMO_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
+import { DEMO_COMPANY_ID } from "@/lib/constants";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -201,22 +201,16 @@ export async function updateLeadStatus(
   leadId: string,
   status: string
 ): Promise<ApiResult<null>> {
-  // Direct Supabase client update — no dedicated API route exists yet
   try {
-    const { createBrowserSupabaseClient } = await import("@/lib/supabase/client");
-    const db = createBrowserSupabaseClient();
+    const res = await fetch(`/api/leads/${leadId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, company_id: DEMO_COMPANY_ID }),
+    });
+    const json = await res.json();
 
-    if (!db) {
-      return { success: false, error: "Supabase client unavailable" };
-    }
-
-    const { error } = await db
-      .from("leads")
-      .update({ status })
-      .eq("id", leadId);
-
-    if (error) {
-      return { success: false, error: error.message };
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || "Failed to update status" };
     }
     return { success: true };
   } catch (err) {
