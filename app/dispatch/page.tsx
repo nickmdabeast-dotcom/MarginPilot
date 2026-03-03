@@ -216,9 +216,17 @@ export default function DispatchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<DispatchJob | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // Track pending PATCH calls so we don't spam on rapid moves
   const patchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string, type: "success" | "error" = "error") {
+    setToast({ msg, type });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }
 
   // ─── Data fetch ─────────────────────────────────────────────────────────────
 
@@ -252,23 +260,37 @@ export default function DispatchPage() {
 
   // ─── Persist helper ──────────────────────────────────────────────────────────
 
-  async function patchJob(jobId: string, updates: Partial<Pick<DispatchJob, "technician_id" | "status" | "order_index">>) {
+  async function patchJob(
+    jobId: string,
+    updates: Partial<Pick<DispatchJob, "technician_id" | "status" | "order_index">>
+  ): Promise<boolean> {
     try {
-      await fetch(`/api/jobs/${jobId}`, {
+      const res = await fetch(`/api/jobs/${jobId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        showToast(json.error || "Failed to save change", "error");
+        return false;
+      }
+      return true;
     } catch {
-      // Best-effort — local state already updated
+      showToast("Network error — change may not be saved", "error");
+      return false;
     }
   }
 
   // ─── Status change ───────────────────────────────────────────────────────────
 
-  function handleStatusChange(jobId: string, status: string) {
-    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, status } : j)));
-    patchJob(jobId, { status });
+  async function handleStatusChange(jobId: string, status: string) {
+    const prev = jobs.find((j) => j.id === jobId)?.status;
+    setJobs((all) => all.map((j) => (j.id === jobId ? { ...j, status } : j)));
+    const ok = await patchJob(jobId, { status });
+    if (!ok && prev !== undefined) {
+      setJobs((all) => all.map((j) => (j.id === jobId ? { ...j, status: prev } : j)));
+    }
   }
 
   // ─── DnD handlers ───────────────────────────────────────────────────────────
@@ -338,12 +360,15 @@ export default function DispatchPage() {
 
       // Clear pending timeout, batch PATCH calls
       if (patchTimeout.current) clearTimeout(patchTimeout.current);
-      patchTimeout.current = setTimeout(() => {
-        for (const [jobId, idx] of updated.entries()) {
-          patchJob(jobId, {
-            technician_id: targetTechId,
-            order_index: idx,
-          });
+      patchTimeout.current = setTimeout(async () => {
+        const results = await Promise.all(
+          Array.from(updated.entries()).map(([jobId, idx]) =>
+            patchJob(jobId, { technician_id: targetTechId, order_index: idx })
+          )
+        );
+        const failures = results.filter((ok) => !ok).length;
+        if (failures > 0) {
+          showToast(`${failures} job update(s) failed — try refreshing`, "error");
         }
       }, 400);
 
@@ -364,6 +389,19 @@ export default function DispatchPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed right-6 top-20 z-50 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-lg transition-all ${
+            toast.type === "success"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+              : "border-red-500/30 bg-red-500/10 text-red-400"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

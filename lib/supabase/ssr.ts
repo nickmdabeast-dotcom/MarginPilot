@@ -3,6 +3,14 @@ import type { Database } from "@/types";
 
 export const SUPABASE_AUTH_COOKIE = "marginpilot-auth-token";
 
+/** Consistent cookie attributes used everywhere we write the auth cookie. */
+export const AUTH_COOKIE_OPTIONS = {
+  path: "/",
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 60 * 24 * 365, // 1 year
+};
+
 type Cookie = { name: string; value: string };
 
 interface CookieAdapter {
@@ -10,14 +18,22 @@ interface CookieAdapter {
   setAll?: (cookies: Array<{ name: string; value: string }>) => void;
 }
 
-function parseStoredSession(raw: string | null | undefined) {
+// ─── Session parsing ──────────────────────────────────────────────────────────
+
+export function parseStoredSession(
+  raw: string | null | undefined
+): Record<string, unknown> | null {
   if (!raw) return null;
 
   try {
-    return JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    return null;
   } catch {
     try {
-      return JSON.parse(decodeURIComponent(raw)) as unknown;
+      const parsed = JSON.parse(decodeURIComponent(raw)) as unknown;
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+      return null;
     } catch {
       return null;
     }
@@ -28,26 +44,36 @@ export function extractAccessTokenFromStoredSession(
   raw: string | null | undefined
 ): string | null {
   const session = parseStoredSession(raw);
-  if (!session || typeof session !== "object") {
-    return null;
-  }
+  if (!session) return null;
 
-  const sessionRecord = session as Record<string, unknown>;
-  const directToken = sessionRecord.access_token;
-  if (typeof directToken === "string") {
-    return directToken;
-  }
+  if (typeof session.access_token === "string") return session.access_token;
 
-  const currentSession = sessionRecord.currentSession;
+  const currentSession = session.currentSession;
   if (currentSession && typeof currentSession === "object") {
-    const currentSessionRecord = currentSession as Record<string, unknown>;
-    if (typeof currentSessionRecord.access_token === "string") {
-      return currentSessionRecord.access_token;
-    }
+    const cs = currentSession as Record<string, unknown>;
+    if (typeof cs.access_token === "string") return cs.access_token;
   }
 
   return null;
 }
+
+/** Extract both tokens needed for server-side session refresh. */
+export function extractSessionTokens(
+  raw: string | null | undefined
+): { access_token: string; refresh_token: string } | null {
+  const session = parseStoredSession(raw);
+  if (!session) return null;
+
+  const at =
+    typeof session.access_token === "string" ? session.access_token : null;
+  const rt =
+    typeof session.refresh_token === "string" ? session.refresh_token : null;
+
+  if (!at || !rt) return null;
+  return { access_token: at, refresh_token: rt };
+}
+
+// ─── Cookie storage (browser) ────────────────────────────────────────────────
 
 function cookieStorage() {
   return {
@@ -74,6 +100,8 @@ function cookieStorage() {
   };
 }
 
+// ─── Client factories ────────────────────────────────────────────────────────
+
 export function createBrowserClient(url: string, anonKey: string) {
   return createClient<Database>(url, anonKey, {
     auth: {
@@ -96,7 +124,7 @@ export function createServerClient(
     .find((cookie) => cookie.name === SUPABASE_AUTH_COOKIE)?.value;
   const accessToken = extractAccessTokenFromStoredSession(authCookie);
 
-  const client = createClient<Database>(url, anonKey, {
+  return createClient<Database>(url, anonKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -109,14 +137,4 @@ export function createServerClient(
         }
       : undefined,
   });
-
-  if (!authCookie) {
-    return client;
-  }
-
-  options.cookies.setAll?.([
-    { name: SUPABASE_AUTH_COOKIE, value: authCookie },
-  ]);
-
-  return client;
 }

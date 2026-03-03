@@ -1,9 +1,15 @@
--- ═══════════════════════════════════════════════════════════════
--- MarginPilot — Full Setup Script  (consolidated from 0001–0003)
--- Run this in: Supabase Dashboard → SQL Editor → New Query
+-- =====================================================================
+-- MarginPilot — Full Setup Script  (consolidated from 0001–0004)
+-- Run this in: Supabase Dashboard -> SQL Editor -> New Query
 --
--- For incremental migration, run 0001, 0002, 0003 in order instead.
--- ═══════════════════════════════════════════════════════════════
+-- For incremental migration, run 0001, 0002, 0003, 0004 in order instead.
+--
+-- Migration inventory:
+--   0001_initial_schema    — companies, technicians, jobs, optimization_runs
+--   0002_leads_dispatch    — customers, leads, dispatch columns on jobs
+--   0003_profiles_and_auth — profiles table, onboarding RPC, auth trigger
+--   0004_rls               — row level security policies (all tables)
+-- =====================================================================
 
 create extension if not exists "pgcrypto";
 
