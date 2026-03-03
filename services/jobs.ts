@@ -388,7 +388,7 @@ export async function insertJobsBulk({
   const dates = [...new Set(payloads.map((p) => p.payload.job_date))];
   const existingJobs: Array<{
     id: string;
-    technician_id: string;
+    technician_id: string | null;
     job_date: string;
     revenue_estimate: number;
     duration_estimate_hours: number;
