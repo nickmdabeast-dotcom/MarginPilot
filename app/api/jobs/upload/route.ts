@@ -30,9 +30,12 @@ function debugLog(label: string, payload: unknown) {
 // ─── POST /api/jobs/upload ────────────────────────────────────────────────────
 // Body: multipart/form-data
 //   file       — CSV file (required)
+//   date       — YYYY-MM-DD fallback when CSV rows lack a date column (optional)
 //
 // Success:  { success: true, inserted: number, updated: number, rejectedRows: RowError[] }
 // Failure:  { success: false, error: string, details?: UploadErrorDetails }
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function POST(req: NextRequest) {
   // 0. Require auth + company context first
@@ -71,6 +74,7 @@ export async function POST(req: NextRequest) {
   }
 
   const file = formData.get("file");
+  const fallbackDate = formData.get("date");
 
   if (!file || typeof file === "string") {
     return NextResponse.json(
@@ -114,8 +118,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4. Fail fast if required columns are structurally absent
-  if (missingColumns.length > 0) {
+  // 3b. Validate the fallback date (from date picker) if supplied
+  const dateFallback =
+    typeof fallbackDate === "string" && DATE_RE.test(fallbackDate.trim())
+      ? fallbackDate.trim()
+      : undefined;
+
+  // 4. Fail fast if required columns are structurally absent.
+  //    When a valid fallback date is provided via the date picker, job_date is
+  //    no longer structurally required — per-row validation will use the fallback.
+  const effectiveMissing = dateFallback
+    ? missingColumns.filter((c) => c !== "schedule_date")
+    : missingColumns;
+
+  if (effectiveMissing.length > 0) {
     return NextResponse.json(
       {
         success: false,
@@ -126,7 +142,7 @@ export async function POST(req: NextRequest) {
           headerNormalized,
           headerCanonical,
           requiredColumns: Array.from(REQUIRED_COLUMNS),
-          missingColumns,
+          missingColumns: effectiveMissing,
           sampleRejections: [],
         },
       },
@@ -139,7 +155,7 @@ export async function POST(req: NextRequest) {
   const parseErrors: Array<{ row: number; reason: string }> = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const result = validateJobRow(rows[i], i + 2); // +2: header is row 1
+    const result = validateJobRow(rows[i], i + 2, dateFallback); // +2: header is row 1
     if (result.ok) {
       validRows.push(result.data);
     } else {

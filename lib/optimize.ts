@@ -202,11 +202,14 @@ function pickTechnician(slots: TechSlot[], duration: number): TechSlot {
   // Pass 2 — all would overtime; pick lowest projected total
   for (const slot of slots) {
     const projected = slot.total_hours + duration;
-    const bestProjected = best!.total_hours + duration;
+    if (best === null) {
+      best = slot;
+      continue;
+    }
+    const bestProjected = best.total_hours + duration;
     if (
-      best === null ||
       projected < bestProjected ||
-      (projected === bestProjected && slot.id < best!.id)
+      (projected === bestProjected && slot.id < best.id)
     ) {
       best = slot;
     }

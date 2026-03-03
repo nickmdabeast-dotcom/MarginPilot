@@ -94,7 +94,8 @@ export type ValidationResult =
  */
 export function validateJobRow(
   raw: ParsedRow,
-  rowIndex: number
+  rowIndex: number,
+  fallbackDate?: string
 ): ValidationResult {
   const trimmedTechName = raw.technician_name?.trim() ?? "";
   if (!trimmedTechName) {
@@ -126,7 +127,7 @@ export function validateJobRow(
     return { ok: false, error: { row: rowIndex, message: `invalid urgency — got "${raw.urgency}" (expected 1–5 or "high"/"medium"/"low")` } };
   }
 
-  const scheduleDate = parseDate(raw.schedule_date ?? "");
+  const scheduleDate = parseDate(raw.schedule_date ?? "") ?? (fallbackDate || null);
   if (!scheduleDate) {
     return { ok: false, error: { row: rowIndex, message: `invalid date — got "${raw.schedule_date}" (expected YYYY-MM-DD or MM/DD/YYYY)` } };
   }

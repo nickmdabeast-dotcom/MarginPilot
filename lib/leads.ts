@@ -1,7 +1,5 @@
 // ─── Client-side fetch layer for Leads ──────────────────────────────────────
 
-const DEMO_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface LeadCustomer {
@@ -113,7 +111,6 @@ export async function fetchLeads(
   signal?: AbortSignal
 ): Promise<ApiResult<Lead[]>> {
   const url = new URL("/api/leads", window.location.origin);
-  url.searchParams.set("company_id", DEMO_COMPANY_ID);
   if (params.status) url.searchParams.set("status", params.status);
 
   try {
@@ -155,7 +152,7 @@ export async function createLead(
     const res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, company_id: DEMO_COMPANY_ID }),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
 
@@ -179,7 +176,7 @@ export async function convertLeadToJob(
     const res = await fetch("/api/leads/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, company_id: DEMO_COMPANY_ID }),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
 
@@ -201,22 +198,16 @@ export async function updateLeadStatus(
   leadId: string,
   status: string
 ): Promise<ApiResult<null>> {
-  // Direct Supabase client update — no dedicated API route exists yet
   try {
-    const { createBrowserSupabaseClient } = await import("@/lib/supabase/client");
-    const db = createBrowserSupabaseClient();
+    const res = await fetch(`/api/leads/${leadId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    const json = await res.json();
 
-    if (!db) {
-      return { success: false, error: "Supabase client unavailable" };
-    }
-
-    const { error } = await db
-      .from("leads")
-      .update({ status })
-      .eq("id", leadId);
-
-    if (error) {
-      return { success: false, error: error.message };
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || "Failed to update status" };
     }
     return { success: true };
   } catch (err) {
