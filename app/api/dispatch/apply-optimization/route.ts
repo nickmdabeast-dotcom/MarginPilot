@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthError } from "@/lib/auth";
 import { getApiContext } from "@/lib/apiContext";
+import { chunk } from "@/lib/utils";
 import type { DispatchTechAssignment } from "@/lib/optimize";
+
+const BATCH_SIZE = 50;
 
 export const dynamic = "force-dynamic";
 
@@ -73,13 +76,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Apply each assignment — update jobs in parallel
+    // Flatten plan into individual update operations
+    const ops = plan.flatMap(({ technician_id, jobs }) =>
+      jobs.map(({ job_id, suggested_start, order_index }) => ({
+        technician_id, job_id, suggested_start, order_index,
+      }))
+    );
+
+    // Apply updates in controlled batches to avoid connection pool exhaustion
     let updated_count = 0;
     const errors: string[] = [];
+    const batches = chunk(ops, BATCH_SIZE);
+    const startMs = Date.now();
 
-    await Promise.all(
-      plan.flatMap(({ technician_id, jobs }) =>
-        jobs.map(async ({ job_id, suggested_start, order_index }) => {
+    for (const batch of batches) {
+      await Promise.all(
+        batch.map(async ({ technician_id, job_id, suggested_start, order_index }) => {
           const { error } = await db
             .from("jobs")
             .update({
@@ -96,14 +108,20 @@ export async function POST(req: NextRequest) {
             updated_count++;
           }
         })
-      )
-    );
+      );
+    }
+
+    const elapsed_ms = Date.now() - startMs;
+
+    const SHOW_DIAGNOSTICS =
+      process.env.NODE_ENV !== "production" || process.env.DEBUG_APPLY_OPTIMIZATION === "1";
 
     return NextResponse.json(
       {
         success: true,
         updated_count,
         ...(errors.length > 0 ? { warnings: errors } : {}),
+        ...(SHOW_DIAGNOSTICS ? { _diagnostics: { batch_count: batches.length, elapsed_ms } } : {}),
       },
       { status: 200 }
     );
