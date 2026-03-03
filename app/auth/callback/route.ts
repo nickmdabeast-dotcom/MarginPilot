@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_AUTH_COOKIE, AUTH_COOKIE_OPTIONS } from "@/lib/supabase/ssr";
 
+function safeRedirectPath(nextPath: string | null): string {
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/dashboard";
+  }
+  return nextPath;
+}
+
 /**
  * GET /auth/callback
  *
@@ -13,7 +20,7 @@ import { SUPABASE_AUTH_COOKIE, AUTH_COOKIE_OPTIONS } from "@/lib/supabase/ssr";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = safeRedirectPath(searchParams.get("next"));
 
   if (!code) {
     // No code — redirect to login with an error hint
