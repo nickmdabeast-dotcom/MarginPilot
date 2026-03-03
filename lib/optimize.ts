@@ -103,10 +103,17 @@ export interface OptimizationResult {
 const OT_THRESHOLD = 8;       // hours
 const OT_RATE_MULTIPLIER = 1.5; // overtime wage multiplier (simulation assumption)
 
+/**
+ * When `true`, scoring normalizes revenue/urgency/duration to [0,1] before
+ * applying weights so no single dimension dominates. When `false` (default),
+ * the original raw-value scoring is used (revenue-dominant).
+ */
+export const NORMALIZE_SCORING = false;
+
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
 /**
- * Deterministic priority score.
+ * Deterministic priority score (raw-value mode).
  *   Higher revenue  → higher score
  *   Higher urgency  → higher score
  *   Longer job      → lower score (opportunity cost)
@@ -117,6 +124,40 @@ function computeScore(job: JobInput): number {
     job.urgency * 0.3 -
     job.duration_estimate_hours * 0.2
   );
+}
+
+/**
+ * Min-max normalize `value` within the range of `all`.
+ * Returns 0.5 when all values are identical (avoids division by zero).
+ */
+function minMaxNormalize(value: number, all: number[]): number {
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  if (max === min) return 0.5;
+  return (value - min) / (max - min);
+}
+
+/**
+ * Scores all jobs with each dimension normalized to [0,1] first,
+ * so urgency and duration have equal footing with revenue.
+ */
+function computeNormalizedScores(jobs: JobInput[]): ScoredJob[] {
+  if (jobs.length <= 1) {
+    return jobs.map((j) => ({ ...j, score: round2(computeScore(j)) }));
+  }
+
+  const revenues = jobs.map((j) => j.revenue_estimate);
+  const urgencies = jobs.map((j) => j.urgency);
+  const durations = jobs.map((j) => j.duration_estimate_hours);
+
+  return jobs.map((j) => ({
+    ...j,
+    score: round2(
+      minMaxNormalize(j.revenue_estimate, revenues) * 0.5 +
+      minMaxNormalize(j.urgency, urgencies) * 0.3 -
+      minMaxNormalize(j.duration_estimate_hours, durations) * 0.2
+    ),
+  }));
 }
 
 // ── Snapshot builder ──────────────────────────────────────────────────────────
@@ -180,42 +221,47 @@ interface TechSlot {
  *   2. If all technicians would exceed 8 h, assign to whichever has the lowest
  *      projected total after adding this job (minimises overtime depth).
  *   Ties broken by technician id for determinism.
+ *
+ * Throws if `slots` is empty (should never happen — caller guarantees jobs exist).
  */
 function pickTechnician(slots: TechSlot[], duration: number): TechSlot {
-  let best: TechSlot | null = null;
+  if (slots.length === 0) {
+    throw new Error("pickTechnician: no technician slots available");
+  }
 
   // Pass 1 — find a slot that stays within threshold
+  let bestUnder: TechSlot | null = null;
   for (const slot of slots) {
     if (slot.total_hours + duration <= OT_THRESHOLD) {
       if (
-        best === null ||
-        slot.total_hours < best.total_hours ||
-        (slot.total_hours === best.total_hours && slot.id < best.id)
+        bestUnder === null ||
+        slot.total_hours < bestUnder.total_hours ||
+        (slot.total_hours === bestUnder.total_hours && slot.id < bestUnder.id)
       ) {
-        best = slot;
+        bestUnder = slot;
       }
     }
   }
 
-  if (best !== null) return best;
+  if (bestUnder !== null) return bestUnder;
 
-  // Pass 2 — all would overtime; pick lowest projected total
-  for (const slot of slots) {
-    const projected = slot.total_hours + duration;
-    if (best === null) {
-      best = slot;
-      continue;
-    }
-    const bestProjected = best.total_hours + duration;
+  // Pass 2 — all would exceed threshold; pick lowest projected total.
+  // Initialize from slots[0] (guaranteed to exist by the guard above)
+  // so the return type is provably non-null without assertion.
+  let bestOver: TechSlot = slots[0];
+  for (let i = 1; i < slots.length; i++) {
+    const slot = slots[i];
+    const slotProjected = slot.total_hours + duration;
+    const bestProjected = bestOver.total_hours + duration;
     if (
-      projected < bestProjected ||
-      (projected === bestProjected && slot.id < best.id)
+      slotProjected < bestProjected ||
+      (slotProjected === bestProjected && slot.id < bestOver.id)
     ) {
-      best = slot;
+      bestOver = slot;
     }
   }
 
-  return best!;
+  return bestOver;
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -289,10 +335,9 @@ export function optimizeJobs(jobs: JobInput[], averageHourlyLaborCost?: number):
   }
 
   // ── Step 1: Score every job ────────────────────────────────────────────────
-  const scored: ScoredJob[] = jobs.map((j) => ({
-    ...j,
-    score: round2(computeScore(j)),
-  }));
+  const scored: ScoredJob[] = NORMALIZE_SCORING
+    ? computeNormalizedScores(jobs)
+    : jobs.map((j) => ({ ...j, score: round2(computeScore(j)) }));
 
   // ── Step 2: Sort by score descending, id ascending for determinism on ties ─
   const sortedByScore = [...scored].sort(
