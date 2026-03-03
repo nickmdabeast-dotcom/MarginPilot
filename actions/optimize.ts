@@ -1,7 +1,7 @@
 "use server";
 
-import { isAuthError, requireCompanyId } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase/server";
+import { isAuthError } from "@/lib/auth";
+import { getApiContext } from "@/lib/apiContext";
 import { optimizeJobs, type OptimizationResult } from "@/lib/optimize";
 import { getJobsByDate } from "@/services/jobs";
 
@@ -18,8 +18,7 @@ export async function runOptimization(
   }
 
   try {
-    const db = createServerClient();
-    const { companyId } = await requireCompanyId(db);
+    const { db, companyId } = await getApiContext();
     const jobs = await getJobsByDate(companyId, date, db);
 
     return { success: true, result: optimizeJobs(jobs, averageHourlyLaborCost) };

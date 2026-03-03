@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthError, requireCompanyId } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase/server";
+import { isAuthError } from "@/lib/auth";
+import { getApiContext } from "@/lib/apiContext";
 import { optimizeJobs, redatePlan } from "@/lib/optimize";
 import { getJobsByDate } from "@/services/jobs";
 import type { Json } from "@/types";
@@ -14,8 +14,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const db = createServerClient();
-    const { companyId } = await requireCompanyId(db);
+    const { db, companyId } = await getApiContext();
 
     // 1. Parse body
     let body: unknown;
@@ -55,9 +54,15 @@ export async function POST(req: NextRequest) {
     // 3. Run optimization engine
     const result = optimizeJobs(jobs, laborCost);
 
-    // Debug logging (guarded)
+    // Debug logging (guarded — single concise line per request)
     if (process.env.DEBUG_OPTIMIZER === "1" && result._debug) {
-      console.log("[optimizer] debug:", JSON.stringify(result._debug, null, 2));
+      const d = result._debug;
+      console.log(
+        `OPTIMIZER Δ rph:${d.revenue_per_hour_delta >= 0 ? "+" : ""}${d.revenue_per_hour_delta.toFixed(2)}`
+        + ` | overtime:${d.overtime_tech_count_delta >= 0 ? "+" : ""}${d.overtime_tech_count_delta}`
+        + ` | variance:${d.workload_variance_delta >= 0 ? "+" : ""}${d.workload_variance_delta.toFixed(2)}`
+        + ` | changed:${d.changed_count}/${d.input_job_count}`
+      );
     }
 
     // 4. Persist run record (best-effort — don't fail the response if this errors)
