@@ -71,6 +71,7 @@ export const HEADER_ALIASES: Record<string, string> = {
   cost: "revenue",
   fee: "revenue",
   value: "revenue",
+  job_value: "revenue",
 
   // duration_hours / duration_minutes
   duration: "duration_hours",

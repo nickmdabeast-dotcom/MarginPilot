@@ -1,0 +1,11 @@
+Tech,Job ID,Job Name,Revenue,Duration Hours,Urgency,Schedule Date
+Alice,J-001,HVAC Full Install,$4200,5,5,2026-03-10
+Alice,J-002,Ductwork Replacement,$3800,4,5,2026-03-10
+Alice,J-003,AC Repair,$1500,2,4,2026-03-10
+Alice,J-004,Thermostat Wiring,$800,1.5,3,2026-03-10
+Bob,J-005,Filter Change,$120,0.5,1,2026-03-10
+Carol,J-006,Vent Cleaning,$180,1,1,2026-03-10
+Alice,J-007,Furnace Tune-up,$950,1.5,3,2026-03-10
+Alice,J-008,Compressor Swap,$2200,3,5,2026-03-10
+Bob,J-009,Inspection,$200,1,2,2026-03-10
+Carol,J-010,Drain Line Clear,$350,0.5,2,2026-03-10
