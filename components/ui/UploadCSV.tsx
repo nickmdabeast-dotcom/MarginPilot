@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 const COLUMN_HINT =
-  "Your CSV headers can be: Technician Name, Job ID, Job Name, Revenue, Duration (hrs), Urgency, Schedule Date";
+  "Your CSV headers can be: Technician Name, Job ID, Job Name, Revenue, Duration (hrs), Urgency, Schedule Date — date column optional (uses date picker above)";
 
 interface UploadResult {
   inserted: number;
