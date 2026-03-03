@@ -12,9 +12,6 @@ const navLinks = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Dispatch", href: "/dispatch" },
   { label: "Leads", href: "/leads" },
-  { label: "Jobs", href: "/jobs" },
-  { label: "Customers", href: "/customers" },
-  { label: "Reports", href: "/reports" },
 ];
 
 export function Navbar() {
