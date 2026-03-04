@@ -3,6 +3,7 @@ import type { Database } from "@/types";
 import type { ParsedRow } from "@/lib/csv";
 import type { JobInput } from "@/lib/optimize";
 import { chunk } from "@/lib/utils";
+import { createHash } from "crypto";
 
 type DbClient = SupabaseClient<Database>;
 
@@ -156,9 +157,8 @@ export function validateJobRow(
  * Computes a composite signature string for a validated job row.
  *
  * Strategy:
- *  - If `job_id` is present (non-empty after trim), use `job_id::<normalized_job_id>`.
- *    This means two rows with different job_ids are never considered duplicates,
- *    even when technician/date/revenue/duration/urgency match.
+ *  - If `job_id` is present (non-empty after trim), use `job_id::<normalized_job_id>|<schedule_date>`.
+ *    Same job_id on different dates are treated as distinct jobs.
  *  - Otherwise fall back to the composite key:
  *    `technician_name|schedule_date|revenue|duration_hours|urgency`.
  *
@@ -168,7 +168,7 @@ export function computeJobSignature(row: ValidJobRow): { signature: string; mode
   const trimmedJobId = row.job_id.trim();
   if (trimmedJobId.length > 0) {
     return {
-      signature: `job_id::${trimmedJobId.toLowerCase()}`,
+      signature: `job_id::${trimmedJobId.toLowerCase()}|${row.schedule_date}`,
       mode: "job_id",
     };
   }
@@ -215,6 +215,32 @@ export function detectBatchCollisions(rows: ValidJobRow[]): CollisionResult {
   }
 
   return { unique, duplicates, signature_mode_counts };
+}
+
+// ─── Row hash for change detection ───────────────────────────────────────────
+
+/**
+ * Computes an MD5 hash of all mutable job fields.
+ * Used to detect whether a re-uploaded row has actually changed.
+ * The hash is stable: same normalized inputs always produce the same digest.
+ */
+export function computeRowHash(fields: {
+  technician_id: string;
+  job_date: string;
+  revenue_estimate: number;
+  duration_estimate_hours: number;
+  urgency: number;
+  job_name: string;
+}): string {
+  const input = [
+    fields.technician_id,
+    fields.job_date,
+    fields.revenue_estimate,
+    fields.duration_estimate_hours,
+    fields.urgency,
+    fields.job_name,
+  ].join("|");
+  return createHash("md5").update(input).digest("hex");
 }
 
 export interface InsertJobsParams {
@@ -334,9 +360,10 @@ export interface InsertJobsBulkResult {
  *
  * Strategy:
  *   1. Resolve technician IDs from the pre-built map.
- *   2. Fetch existing jobs for this company+date range to detect duplicates.
- *   3. Split rows into inserts vs updates.
- *   4. Execute inserts and updates in batches of BATCH_SIZE.
+ *   2. Compute job_signature and row_hash for each row.
+ *   3. Fetch existing jobs by signature to detect duplicates.
+ *   4. Partition into inserts (new), updates (changed), unchanged (skip).
+ *   5. Execute inserts and updates in batches of BATCH_SIZE.
  */
 export async function insertJobsBulk({
   rows,
@@ -351,7 +378,7 @@ export async function insertJobsBulk({
   let insertBatchCount = 0;
   let updateBatchCount = 0;
 
-  // 1. Build payloads and resolve tech IDs
+  // 1. Build payloads with signature + hash, resolve tech IDs
   type JobPayload = {
     company_id: string;
     technician_id: string;
@@ -359,6 +386,10 @@ export async function insertJobsBulk({
     revenue_estimate: number;
     duration_estimate_hours: number;
     urgency: number;
+    job_name: string;
+    external_job_id: string;
+    job_signature: string;
+    row_hash: string;
   };
   const payloads: Array<{ sourceRow: number; payload: JobPayload }> = [];
 
@@ -371,6 +402,17 @@ export async function insertJobsBulk({
       });
       continue;
     }
+
+    const { signature } = computeJobSignature(row);
+    const hash = computeRowHash({
+      technician_id: techId,
+      job_date: row.schedule_date,
+      revenue_estimate: row.revenue,
+      duration_estimate_hours: row.duration_hours,
+      urgency: row.urgency,
+      job_name: row.job_name,
+    });
+
     payloads.push({
       sourceRow: row.sourceRow,
       payload: {
@@ -380,73 +422,58 @@ export async function insertJobsBulk({
         revenue_estimate: row.revenue,
         duration_estimate_hours: row.duration_hours,
         urgency: row.urgency,
+        job_name: row.job_name,
+        external_job_id: row.job_id,
+        job_signature: signature,
+        row_hash: hash,
       },
     });
   }
 
-  // 2. Fetch existing jobs for the relevant dates to detect duplicates
-  const dates = [...new Set(payloads.map((p) => p.payload.job_date))];
-  const existingJobs: Array<{
-    id: string;
-    technician_id: string | null;
-    job_date: string;
-    revenue_estimate: number;
-    duration_estimate_hours: number;
-    urgency: number;
-  }> = [];
+  // 2. Fetch existing jobs by signature for change detection
+  const allSignatures = payloads.map((p) => p.payload.job_signature);
+  const existingSigMap = new Map<string, { id: string; row_hash: string | null }>();
 
-  // Fetch in date chunks to avoid overly large queries
-  for (const dateChunk of chunk(dates, 10)) {
+  for (const sigChunk of chunk(allSignatures, 500)) {
     const { data, error } = await db
       .from("jobs")
-      .select("id, technician_id, job_date, revenue_estimate, duration_estimate_hours, urgency")
+      .select("id, job_signature, row_hash")
       .eq("company_id", companyId)
-      .in("job_date", dateChunk);
+      .in("job_signature", sigChunk);
 
     if (error) {
       // Non-fatal: fall back to treating all as inserts
       break;
     }
-    if (data) existingJobs.push(...data);
-  }
-
-  // 3. Build a signature set from existing jobs for fast lookup
-  const existingSigMap = new Map<string, string>(); // signature → job id
-  for (const job of existingJobs) {
-    const sig = [
-      companyId,
-      job.technician_id,
-      job.job_date,
-      job.revenue_estimate,
-      job.duration_estimate_hours,
-      job.urgency,
-    ].join("|");
-    existingSigMap.set(sig, job.id);
-  }
-
-  // 4. Split into inserts vs unchanged
-  //    The signature includes ALL payload fields, so a match means the
-  //    existing row is identical — no UPDATE needed (skip as unchanged).
-  const toInsert: Array<{ sourceRow: number; payload: JobPayload }> = [];
-
-  for (const item of payloads) {
-    const sig = [
-      item.payload.company_id,
-      item.payload.technician_id,
-      item.payload.job_date,
-      item.payload.revenue_estimate,
-      item.payload.duration_estimate_hours,
-      item.payload.urgency,
-    ].join("|");
-
-    if (existingSigMap.has(sig)) {
-      unchanged++;
-    } else {
-      toInsert.push(item);
+    if (data) {
+      for (const row of data) {
+        if (row.job_signature) {
+          existingSigMap.set(row.job_signature, { id: row.id, row_hash: row.row_hash });
+        }
+      }
     }
   }
 
-  // 5. Batched inserts
+  // 3. Partition into inserts, updates, unchanged
+  const toInsert: Array<{ sourceRow: number; payload: JobPayload }> = [];
+  const toUpdate: Array<{ sourceRow: number; existingId: string; payload: JobPayload }> = [];
+
+  for (const item of payloads) {
+    const existing = existingSigMap.get(item.payload.job_signature);
+
+    if (!existing) {
+      // New row — INSERT
+      toInsert.push(item);
+    } else if (existing.row_hash !== item.payload.row_hash) {
+      // Signature matches but content changed — UPDATE
+      toUpdate.push({ sourceRow: item.sourceRow, existingId: existing.id, payload: item.payload });
+    } else {
+      // Signature + hash match — skip
+      unchanged++;
+    }
+  }
+
+  // 4. Batched inserts
   for (const batch of chunk(toInsert, BATCH_SIZE)) {
     insertBatchCount++;
     const { data, error } = await db
@@ -466,6 +493,24 @@ export async function insertJobsBulk({
       }
     } else {
       inserted += data?.length ?? batch.length;
+    }
+  }
+
+  // 5. Batched updates (individual UPDATE per row — safe for varying payloads)
+  for (const batch of chunk(toUpdate, BATCH_SIZE)) {
+    updateBatchCount++;
+    for (const item of batch) {
+      const { company_id: _cid, job_signature: _sig, ...updateFields } = item.payload;
+      const { error } = await db
+        .from("jobs")
+        .update(updateFields)
+        .eq("id", item.existingId);
+
+      if (error) {
+        failed.push({ row: item.sourceRow, message: error.message });
+      } else {
+        updated++;
+      }
     }
   }
 

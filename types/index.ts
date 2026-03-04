@@ -199,6 +199,10 @@ export type Database = {
           scheduled_start: string | null;
           scheduled_end: string | null;
           order_index: number;
+          job_name: string | null;
+          external_job_id: string | null;
+          job_signature: string | null;
+          row_hash: string | null;
           created_at: string;
         };
         Insert: {
@@ -216,6 +220,10 @@ export type Database = {
           scheduled_start?: string | null;
           scheduled_end?: string | null;
           order_index?: number;
+          job_name?: string | null;
+          external_job_id?: string | null;
+          job_signature?: string | null;
+          row_hash?: string | null;
           created_at?: string;
         };
         Update: {
@@ -233,6 +241,10 @@ export type Database = {
           scheduled_start?: string | null;
           scheduled_end?: string | null;
           order_index?: number;
+          job_name?: string | null;
+          external_job_id?: string | null;
+          job_signature?: string | null;
+          row_hash?: string | null;
           created_at?: string;
         };
         Relationships: [

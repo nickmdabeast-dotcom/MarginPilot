@@ -468,6 +468,27 @@ describe("detectBatchCollisions", () => {
     assert.equal(signature_mode_counts.fallback, 0);
   });
 
+  it("same job_id different date => NOT duplicate", () => {
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "J-100", schedule_date: "2025-06-15" }),
+      makeRow({ sourceRow: 3, job_id: "J-100", schedule_date: "2025-06-16" }),
+    ];
+    const { unique, duplicates } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 2, "same job_id on different dates should not collide");
+    assert.equal(duplicates.length, 0);
+  });
+
+  it("same job_id same date => duplicate", () => {
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "J-100", schedule_date: "2025-06-15" }),
+      makeRow({ sourceRow: 3, job_id: "J-100", schedule_date: "2025-06-15", revenue: 999 }),
+    ];
+    const { unique, duplicates } = detectBatchCollisions(rows);
+    assert.equal(unique.length, 1);
+    assert.equal(duplicates.length, 1);
+    assert.equal(duplicates[0].row.sourceRow, 3);
+  });
+
   it("same job_id appears twice => second is skipped", () => {
     const rows = [
       makeRow({ sourceRow: 2, job_id: "J-100", revenue: 500 }),
@@ -500,7 +521,7 @@ describe("detectBatchCollisions", () => {
     const r3 = computeJobSignature(makeRow({ job_id: "12345" }));
     assert.equal(r1.signature, r2.signature, "trim + lowercase should match");
     assert.equal(r1.mode, "job_id");
-    assert.equal(r3.signature, "job_id::12345", "numeric job_id should remain string");
+    assert.equal(r3.signature, "job_id::12345|2025-06-15", "numeric job_id should remain string with date");
     assert.equal(r3.mode, "job_id");
   });
 });
@@ -541,7 +562,7 @@ describe("detectBatchCollisions – duplicate job_id regression", () => {
     // Second row appears in duplicates with the right reason
     assert.equal(duplicates.length, 1);
     assert.equal(duplicates[0].row.sourceRow, 3);
-    assert.equal(duplicates[0].signature, "job_id::dup-001");
+    assert.equal(duplicates[0].signature, "job_id::dup-001|2025-06-15");
 
     // Signature mode
     assert.equal(signature_mode_counts.job_id, 2);

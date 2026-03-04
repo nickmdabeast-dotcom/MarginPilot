@@ -13,6 +13,8 @@ import assert from "node:assert/strict";
 import {
   insertJobsBulk,
   BATCH_SIZE,
+  computeJobSignature,
+  computeRowHash,
   type ValidJobRow,
   type InsertJobsBulkResult,
 } from "../services/jobs.js";
@@ -35,11 +37,8 @@ function createMockDb(options: {
   existingTechnicians?: Array<{ id: string; name: string }>;
   existingJobs?: Array<{
     id: string;
-    technician_id: string;
-    job_date: string;
-    revenue_estimate: number;
-    duration_estimate_hours: number;
-    urgency: number;
+    job_signature: string;
+    row_hash: string;
   }>;
 } = {}) {
   const calls: CallLog[] = [];
@@ -232,17 +231,23 @@ describe("insertJobsBulk", () => {
 
   it("detects existing jobs and counts them as unchanged (no-op)", async () => {
     const techMap = new Map([["alice", "tech-1"]]);
-    const rows = [makeRow({ sourceRow: 2 })];
+    const row = makeRow({ sourceRow: 2 });
+    const rows = [row];
+
+    // Pre-compute the signature and hash that insertJobsBulk will produce
+    const { signature } = computeJobSignature(row);
+    const hash = computeRowHash({
+      technician_id: "tech-1",
+      job_date: row.schedule_date,
+      revenue_estimate: row.revenue,
+      duration_estimate_hours: row.duration_hours,
+      urgency: row.urgency,
+      job_name: row.job_name,
+    });
+
     const { db } = createMockDb({
       existingJobs: [
-        {
-          id: "existing-job-1",
-          technician_id: "tech-1",
-          job_date: "2025-06-15",
-          revenue_estimate: 1500,
-          duration_estimate_hours: 2.5,
-          urgency: 5,
-        },
+        { id: "existing-job-1", job_signature: signature, row_hash: hash },
       ],
     });
 
@@ -306,4 +311,73 @@ describe("insertJobsBulk", () => {
       }
     });
   }
+
+  // ── Idempotency tests ────────────────────────────────────────────────────
+
+  it("identical re-upload → inserted=0, updated=0, unchanged=N", async () => {
+    const techMap = new Map([["alice", "tech-1"], ["bob", "tech-2"]]);
+    const rows = [
+      makeRow({ sourceRow: 2, job_id: "J-001", technician_name: "Alice" }),
+      makeRow({ sourceRow: 3, job_id: "J-002", technician_name: "Bob", revenue: 2000 }),
+      makeRow({ sourceRow: 4, job_id: "J-003", technician_name: "Alice", revenue: 800 }),
+    ];
+
+    // Pre-compute signatures and hashes to simulate existing DB state
+    const existingJobs = rows.map((row, i) => {
+      const { signature } = computeJobSignature(row);
+      const techId = techMap.get(row.technician_name.toLowerCase().trim())!;
+      const hash = computeRowHash({
+        technician_id: techId,
+        job_date: row.schedule_date,
+        revenue_estimate: row.revenue,
+        duration_estimate_hours: row.duration_hours,
+        urgency: row.urgency,
+        job_name: row.job_name,
+      });
+      return { id: `existing-${i}`, job_signature: signature, row_hash: hash };
+    });
+
+    const { db } = createMockDb({ existingJobs });
+    const result = await insertJobsBulk({ rows, companyId: "comp-1", db, techMap });
+
+    assert.equal(result.inserted, 0, "No new rows should be inserted");
+    assert.equal(result.updated, 0, "No rows should be updated");
+    assert.equal(result.unchanged, 3, "All rows should be unchanged");
+  });
+
+  it("modify one field → updated=1, rest unchanged", async () => {
+    const techMap = new Map([["alice", "tech-1"], ["bob", "tech-2"]]);
+    const originalRows = [
+      makeRow({ sourceRow: 2, job_id: "J-001", technician_name: "Alice", revenue: 1500 }),
+      makeRow({ sourceRow: 3, job_id: "J-002", technician_name: "Bob", revenue: 2000 }),
+    ];
+
+    // Simulate DB with original data
+    const existingJobs = originalRows.map((row, i) => {
+      const { signature } = computeJobSignature(row);
+      const techId = techMap.get(row.technician_name.toLowerCase().trim())!;
+      const hash = computeRowHash({
+        technician_id: techId,
+        job_date: row.schedule_date,
+        revenue_estimate: row.revenue,
+        duration_estimate_hours: row.duration_hours,
+        urgency: row.urgency,
+        job_name: row.job_name,
+      });
+      return { id: `existing-${i}`, job_signature: signature, row_hash: hash };
+    });
+
+    // Re-upload with one field changed (revenue on J-001)
+    const modifiedRows = [
+      makeRow({ sourceRow: 2, job_id: "J-001", technician_name: "Alice", revenue: 9999 }),
+      makeRow({ sourceRow: 3, job_id: "J-002", technician_name: "Bob", revenue: 2000 }),
+    ];
+
+    const { db } = createMockDb({ existingJobs });
+    const result = await insertJobsBulk({ rows: modifiedRows, companyId: "comp-1", db, techMap });
+
+    assert.equal(result.updated, 1, "One row should be updated (revenue changed)");
+    assert.equal(result.unchanged, 1, "One row should be unchanged");
+    assert.equal(result.inserted, 0, "No new rows should be inserted");
+  });
 });
