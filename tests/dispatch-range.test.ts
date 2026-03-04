@@ -108,7 +108,72 @@ function createMockDb(allJobs: Array<{ id: string; job_date: string }>) {
   };
 }
 
+// ─── weekBounds (mirrors export from dispatch page) ─────────────────────────
+
+/** Returns [monday, sunday] for the ISO week containing `dateStr`. */
+function weekBounds(dateStr: string): [string, string] {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const day = d.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+  const diffToMon = day === 0 ? -6 : 1 - day;
+  const mon = new Date(d);
+  mon.setUTCDate(d.getUTCDate() + diffToMon);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  return [mon.toISOString().split("T")[0], sun.toISOString().split("T")[0]];
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
+
+describe("weekBounds", () => {
+  it("returns Monday-Sunday for a Wednesday", () => {
+    // 2026-03-04 is a Wednesday
+    const [mon, sun] = weekBounds("2026-03-04");
+    assert.equal(mon, "2026-03-02"); // Monday
+    assert.equal(sun, "2026-03-08"); // Sunday
+  });
+
+  it("returns Monday-Sunday for a Monday", () => {
+    const [mon, sun] = weekBounds("2026-03-02");
+    assert.equal(mon, "2026-03-02");
+    assert.equal(sun, "2026-03-08");
+  });
+
+  it("returns Monday-Sunday for a Sunday", () => {
+    const [mon, sun] = weekBounds("2026-03-08");
+    assert.equal(mon, "2026-03-02");
+    assert.equal(sun, "2026-03-08");
+  });
+
+  it("handles week crossing month boundary", () => {
+    // 2026-02-28 is a Saturday
+    const [mon, sun] = weekBounds("2026-02-28");
+    assert.equal(mon, "2026-02-23"); // Monday
+    assert.equal(sun, "2026-03-01"); // Sunday
+  });
+});
+
+describe("view mode URL building", () => {
+  it("day mode produces ?date= URL", () => {
+    const date = "2026-03-05";
+    const url = `/api/dispatch?date=${date}`;
+    assert.match(url, /\?date=2026-03-05$/);
+    assert.ok(!url.includes("start="));
+  });
+
+  it("week mode produces ?start=&end= from weekBounds", () => {
+    const date = "2026-03-04"; // Wednesday
+    const [ws, we] = weekBounds(date);
+    const url = `/api/dispatch?start=${ws}&end=${we}`;
+    assert.match(url, /start=2026-03-02/);
+    assert.match(url, /end=2026-03-08/);
+  });
+
+  it("range mode passes arbitrary start/end", () => {
+    const url = `/api/dispatch?start=2026-03-01&end=2026-03-15`;
+    assert.match(url, /start=2026-03-01/);
+    assert.match(url, /end=2026-03-15/);
+  });
+});
 
 describe("dispatch date range resolution", () => {
   it("start + end params produce a multi-day range", () => {

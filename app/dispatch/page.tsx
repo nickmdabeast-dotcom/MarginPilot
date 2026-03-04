@@ -209,6 +209,8 @@ function TechColumn({
 
 // ─── Dispatch Page ─────────────────────────────────────────────────────────────
 
+type ViewMode = "day" | "week" | "range";
+
 function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
@@ -219,9 +221,23 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split("T")[0];
 }
 
+/** Returns [monday, sunday] for the ISO week containing `dateStr`. */
+function weekBounds(dateStr: string): [string, string] {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const day = d.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+  const diffToMon = day === 0 ? -6 : 1 - day;
+  const mon = new Date(d);
+  mon.setUTCDate(d.getUTCDate() + diffToMon);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  return [mon.toISOString().split("T")[0], sun.toISOString().split("T")[0]];
+}
+
 export default function DispatchPage() {
-  const [startDate, setStartDate] = useState(() => todayStr());
-  const [endDate, setEndDate] = useState(() => addDays(todayStr(), 6));
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
+  const [selectedDate, setSelectedDate] = useState(() => todayStr());
+  const [rangeStart, setRangeStart] = useState(() => todayStr());
+  const [rangeEnd, setRangeEnd] = useState(() => addDays(todayStr(), 6));
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -241,11 +257,11 @@ export default function DispatchPage() {
 
   // ─── Data fetch ─────────────────────────────────────────────────────────────
 
-  const fetchDispatch = useCallback(async (start: string, end: string) => {
+  const fetchDispatch = useCallback(async (url: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dispatch?start=${start}&end=${end}`);
+      const res = await fetch(url);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       setTechnicians(json.technicians);
@@ -258,8 +274,15 @@ export default function DispatchPage() {
   }, []);
 
   useEffect(() => {
-    fetchDispatch(startDate, endDate);
-  }, [startDate, endDate, fetchDispatch]);
+    if (viewMode === "day") {
+      fetchDispatch(`/api/dispatch?date=${selectedDate}`);
+    } else if (viewMode === "week") {
+      const [ws, we] = weekBounds(selectedDate);
+      fetchDispatch(`/api/dispatch?start=${ws}&end=${we}`);
+    } else {
+      fetchDispatch(`/api/dispatch?start=${rangeStart}&end=${rangeEnd}`);
+    }
+  }, [viewMode, selectedDate, rangeStart, rangeEnd, fetchDispatch]);
 
   // ─── Derived state ───────────────────────────────────────────────────────────
 
@@ -420,25 +443,69 @@ export default function DispatchPage() {
           <p className="mt-1 text-sm text-gray-500">
             Drag jobs between technicians to reassign
             {!loading && ` · ${jobs.length} job${jobs.length !== 1 ? "s" : ""}`}
+            {!loading && viewMode === "week" && (() => {
+              const [ws, we] = weekBounds(selectedDate);
+              return ` · ${ws} to ${we}`;
+            })()}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">From</label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
-          />
-          <label className="text-xs text-gray-500">To</label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
-          />
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* View mode toggle */}
+          <div className="flex rounded-lg border border-white/10 overflow-hidden">
+            {(["day", "week", "range"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setViewMode(m)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === m
+                    ? "bg-blue-500/20 text-blue-400"
+                    : "bg-white/5 text-gray-400 hover:bg-white/10"
+                }`}
+              >
+                {m === "day" ? "Day" : m === "week" ? "Week" : "Range"}
+              </button>
+            ))}
+          </div>
+
+          {/* Date inputs based on mode */}
+          {viewMode !== "range" && (
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
+            />
+          )}
+          {viewMode === "range" && (
+            <>
+              <label className="text-xs text-gray-500">From</label>
+              <input
+                type="date"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
+              />
+              <label className="text-xs text-gray-500">To</label>
+              <input
+                type="date"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
+              />
+            </>
+          )}
+
           <button
-            onClick={() => fetchDispatch(startDate, endDate)}
+            onClick={() => {
+              if (viewMode === "day") {
+                fetchDispatch(`/api/dispatch?date=${selectedDate}`);
+              } else if (viewMode === "week") {
+                const [ws, we] = weekBounds(selectedDate);
+                fetchDispatch(`/api/dispatch?start=${ws}&end=${we}`);
+              } else {
+                fetchDispatch(`/api/dispatch?start=${rangeStart}&end=${rangeEnd}`);
+              }
+            }}
             className="text-sm px-4 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
           >
             Refresh
