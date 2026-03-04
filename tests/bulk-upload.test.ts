@@ -92,6 +92,16 @@ function createMockDb(options: {
           }
           return chainable(table, [{ id: "new-single" }]);
         },
+        upsert: (payload: unknown, _options?: unknown) => {
+          calls.push({ method: "upsert", table, args: payload });
+          if (table === "jobs" && Array.isArray(payload)) {
+            const upserted = payload.map((_: unknown, i: number) => ({
+              id: `upserted-job-${i}`,
+            }));
+            return chainable(table, upserted);
+          }
+          return chainable(table, [{ id: "upserted-single" }]);
+        },
         update: (payload: unknown) => {
           calls.push({ method: "update", table, args: payload });
           return chainable(table, null);
@@ -221,11 +231,11 @@ describe("insertJobsBulk", () => {
     assert.equal(result.jobs_insert_batch_count, expectedBatches);
     assert.equal(result.inserted, 500);
 
-    // Count actual insert calls to jobs table
-    const jobInserts = calls.filter((c) => c.method === "insert" && c.table === "jobs");
+    // Count actual upsert calls to jobs table
+    const jobUpserts = calls.filter((c) => c.method === "upsert" && c.table === "jobs");
     assert.ok(
-      jobInserts.length <= expectedBatches + 1,
-      `Expected at most ${expectedBatches + 1} insert calls, got ${jobInserts.length}`
+      jobUpserts.length <= expectedBatches + 1,
+      `Expected at most ${expectedBatches + 1} upsert calls, got ${jobUpserts.length}`
     );
   });
 
@@ -294,12 +304,12 @@ describe("insertJobsBulk", () => {
         assert.equal(result.jobs_insert_batch_count, expectedBatches);
         assert.equal(result.inserted, 2000);
 
-        const jobInserts = calls.filter((c) => c.method === "insert" && c.table === "jobs");
-        assert.equal(jobInserts.length, expectedBatches);
+        const jobUpserts = calls.filter((c) => c.method === "upsert" && c.table === "jobs");
+        assert.equal(jobUpserts.length, expectedBatches);
 
         console.log(
           `  [benchmark] chunk=${size} batches=${expectedBatches} ` +
-          `db_calls=${jobInserts.length} mock_elapsed=${elapsed}ms`
+          `db_calls=${jobUpserts.length} mock_elapsed=${elapsed}ms`
         );
       } else {
         // Verify the math only — no live call since BATCH_SIZE is a constant

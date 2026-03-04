@@ -209,8 +209,19 @@ function TechColumn({
 
 // ─── Dispatch Page ─────────────────────────────────────────────────────────────
 
+function todayStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
 export default function DispatchPage() {
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState(() => todayStr());
+  const [endDate, setEndDate] = useState(() => addDays(todayStr(), 6));
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -230,11 +241,11 @@ export default function DispatchPage() {
 
   // ─── Data fetch ─────────────────────────────────────────────────────────────
 
-  const fetchDispatch = useCallback(async (d: string) => {
+  const fetchDispatch = useCallback(async (start: string, end: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dispatch?date=${d}`);
+      const res = await fetch(`/api/dispatch?start=${start}&end=${end}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       setTechnicians(json.technicians);
@@ -247,8 +258,8 @@ export default function DispatchPage() {
   }, []);
 
   useEffect(() => {
-    fetchDispatch(date);
-  }, [date, fetchDispatch]);
+    fetchDispatch(startDate, endDate);
+  }, [startDate, endDate, fetchDispatch]);
 
   // ─── Derived state ───────────────────────────────────────────────────────────
 
@@ -403,20 +414,31 @@ export default function DispatchPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Dispatch Board</h1>
-          <p className="mt-1 text-sm text-gray-500">Drag jobs between technicians to reassign</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Drag jobs between technicians to reassign
+            {!loading && ` · ${jobs.length} job${jobs.length !== 1 ? "s" : ""}`}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">From</label>
           <input
             type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
+          />
+          <label className="text-xs text-gray-500">To</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
             className="text-sm rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30 [color-scheme:dark]"
           />
           <button
-            onClick={() => fetchDispatch(date)}
+            onClick={() => fetchDispatch(startDate, endDate)}
             className="text-sm px-4 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
           >
             Refresh

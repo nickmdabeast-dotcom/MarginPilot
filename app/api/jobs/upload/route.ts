@@ -305,75 +305,86 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Bulk-resolve technicians (1-2 queries instead of N)
-  const tTech = performance.now();
-  const uniqueTechNames = [...new Set(nonDuplicateRows.map((r) => r.technician_name))];
-  const techResult = await bulkResolveTechnicians(uniqueTechNames, companyId, db);
-  tick("technician_resolve_ms", tTech);
+  try {
+    // 6. Bulk-resolve technicians (1-2 queries instead of N)
+    const tTech = performance.now();
+    const uniqueTechNames = [...new Set(nonDuplicateRows.map((r) => r.technician_name))];
+    const techResult = await bulkResolveTechnicians(uniqueTechNames, companyId, db);
+    tick("technician_resolve_ms", tTech);
 
-  // 7. Bulk insert/update jobs (batched)
-  const tUpsert = performance.now();
-  const result = await insertJobsBulk({
-    rows: nonDuplicateRows,
-    companyId,
-    db,
-    techMap: techResult.map,
-  });
-  tick("db_upsert_ms", tUpsert);
+    // 7. Bulk insert/update jobs (batched)
+    const tUpsert = performance.now();
+    const result = await insertJobsBulk({
+      rows: nonDuplicateRows,
+      companyId,
+      db,
+      techMap: techResult.map,
+    });
+    tick("db_upsert_ms", tUpsert);
 
-  const elapsed = Math.round(performance.now() - tParse);
+    const elapsed = Math.round(performance.now() - tParse);
 
-  // Merge parse errors + insert errors for the response (duplicates are NOT included)
-  const allFailed = [
-    ...parseErrors.map((e) => ({ row: e.row, message: e.reason })),
-    ...result.failed,
-  ];
+    // Merge parse errors + insert errors for the response (duplicates are NOT included)
+    const allFailed = [
+      ...parseErrors.map((e) => ({ row: e.row, message: e.reason })),
+      ...result.failed,
+    ];
 
-  const warnings: string[] = [];
-  if (allFailed.length > 0) {
-    warnings.push(`${allFailed.length} row(s) failed validation — see "failed" for details`);
-  }
-  if (skipped.length > 0) {
-    warnings.push(`${skipped.length} duplicate row(s) skipped within this upload`);
-  }
+    const warnings: string[] = [];
+    if (allFailed.length > 0) {
+      warnings.push(`${allFailed.length} row(s) failed validation — see "failed" for details`);
+    }
+    if (skipped.length > 0) {
+      warnings.push(`${skipped.length} duplicate row(s) skipped within this upload`);
+    }
 
-  return NextResponse.json(
-    {
-      success: true,
-      inserted: result.inserted,
-      updated: result.updated,
-      unchanged: result.unchanged,
-      rejectedRows: allFailed,
-      failed: allFailed,
-      skipped,
-      warnings,
-      diagnostics: {
-        headers_raw: headerRaw,
-        headers_normalized: headerNormalized,
-        alias_applied_map: aliasAppliedMap,
-        header_map: headerMap,
-        final_mapped_headers: headerCanonical,
-        rows_total: rows.length,
-        rows_valid: nonDuplicateRows.length,
-        rows_rejected: parseErrors.length,
-        rows_skipped: skipped.length,
-        rejection_reasons_summary: rejectionReasonsSummary,
-        skipped_reasons_summary: skippedReasonsSummary,
-        rejected_rows_sample: rejectedRowSamples,
-        realigned_row_count: realignedRowCount,
-        realigned_row_samples: realignedRowSamples,
-        duplicate_signature_count: duplicates.length,
-        signature_mode_counts,
-        technician_resolved_count: techResult.resolved_count,
-        technician_created_count: techResult.created_count,
-        jobs_insert_batch_count: result.jobs_insert_batch_count,
-        jobs_update_batch_count: result.jobs_update_batch_count,
-        matched_existing_count: result.unchanged,
-        rows_unchanged: result.unchanged,
-        elapsed_ms_total: elapsed,
-        timings,
+    return NextResponse.json(
+      {
+        success: true,
+        inserted: result.inserted,
+        updated: result.updated,
+        unchanged: result.unchanged,
+        rejectedRows: allFailed,
+        failed: allFailed,
+        skipped,
+        warnings,
+        diagnostics: {
+          headers_raw: headerRaw,
+          headers_normalized: headerNormalized,
+          alias_applied_map: aliasAppliedMap,
+          header_map: headerMap,
+          final_mapped_headers: headerCanonical,
+          rows_total: rows.length,
+          rows_valid: nonDuplicateRows.length,
+          rows_rejected: parseErrors.length,
+          rows_skipped: skipped.length,
+          rejection_reasons_summary: rejectionReasonsSummary,
+          skipped_reasons_summary: skippedReasonsSummary,
+          rejected_rows_sample: rejectedRowSamples,
+          realigned_row_count: realignedRowCount,
+          realigned_row_samples: realignedRowSamples,
+          duplicate_signature_count: duplicates.length,
+          signature_mode_counts,
+          technician_resolved_count: techResult.resolved_count,
+          technician_created_count: techResult.created_count,
+          jobs_insert_batch_count: result.jobs_insert_batch_count,
+          jobs_update_batch_count: result.jobs_update_batch_count,
+          matched_existing_count: result.unchanged,
+          rows_unchanged: result.unchanged,
+          elapsed_ms_total: elapsed,
+          timings,
+        },
       },
-    },
-    { status: 200 }
-  );
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error("[csv-upload] Unexpected error during DB operations:", err);
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "Internal server error during upload",
+      },
+      { status: 500 }
+    );
+  }
 }

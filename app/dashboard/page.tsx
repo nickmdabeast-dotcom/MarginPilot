@@ -25,23 +25,23 @@ import { UploadCSV } from "@/components/ui/UploadCSV";
 
 // ─── Mock data (shown before any upload) ─────────────────────────────────────
 const MOCK_JOBS: JobInput[] = [
-  { id: "j1", technician_id: "t1", technician_name: "Mike Torres",   revenue_estimate: 420,  duration_estimate_hours: 2,   urgency: 2 },
-  { id: "j2", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 380,  duration_estimate_hours: 3,   urgency: 1 },
-  { id: "j3", technician_id: "t3", technician_name: "Sarah Chen",    revenue_estimate: 4200, duration_estimate_hours: 5,   urgency: 5 },
-  { id: "j4", technician_id: "t1", technician_name: "Mike Torres",   revenue_estimate: 680,  duration_estimate_hours: 1.5, urgency: 4 },
-  { id: "j5", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 290,  duration_estimate_hours: 1,   urgency: 2 },
-  { id: "j6", technician_id: "t3", technician_name: "Sarah Chen",    revenue_estimate: 180,  duration_estimate_hours: 1,   urgency: 1 },
-  { id: "j7", technician_id: "t1", technician_name: "Mike Torres",   revenue_estimate: 3800, duration_estimate_hours: 6,   urgency: 5 },
-  { id: "j8", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 280,  duration_estimate_hours: 1,   urgency: 2 },
-  { id: "j9", technician_id: "t3", technician_name: "Sarah Chen",    revenue_estimate: 1200, duration_estimate_hours: 2,   urgency: 5 },
+  { id: "j1", technician_id: "t1", technician_name: "Mike Torres", revenue_estimate: 420, duration_estimate_hours: 2, urgency: 2 },
+  { id: "j2", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 380, duration_estimate_hours: 3, urgency: 1 },
+  { id: "j3", technician_id: "t3", technician_name: "Sarah Chen", revenue_estimate: 4200, duration_estimate_hours: 5, urgency: 5 },
+  { id: "j4", technician_id: "t1", technician_name: "Mike Torres", revenue_estimate: 680, duration_estimate_hours: 1.5, urgency: 4 },
+  { id: "j5", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 290, duration_estimate_hours: 1, urgency: 2 },
+  { id: "j6", technician_id: "t3", technician_name: "Sarah Chen", revenue_estimate: 180, duration_estimate_hours: 1, urgency: 1 },
+  { id: "j7", technician_id: "t1", technician_name: "Mike Torres", revenue_estimate: 3800, duration_estimate_hours: 6, urgency: 5 },
+  { id: "j8", technician_id: "t2", technician_name: "Jake Williams", revenue_estimate: 280, duration_estimate_hours: 1, urgency: 2 },
+  { id: "j9", technician_id: "t3", technician_name: "Sarah Chen", revenue_estimate: 1200, duration_estimate_hours: 2, urgency: 5 },
 ];
 
 // ─── Accent map ───────────────────────────────────────────────────────────────
 const accentMap = {
-  blue:   { icon: "text-blue-400 bg-blue-400/10",       bar: "bg-blue-400" },
-  purple: { icon: "text-purple-400 bg-purple-400/10",   bar: "bg-purple-400" },
-  green:  { icon: "text-emerald-400 bg-emerald-400/10", bar: "bg-emerald-400" },
-  orange: { icon: "text-orange-400 bg-orange-400/10",   bar: "bg-orange-400" },
+  blue: { icon: "text-blue-400 bg-blue-400/10", bar: "bg-blue-400" },
+  purple: { icon: "text-purple-400 bg-purple-400/10", bar: "bg-purple-400" },
+  green: { icon: "text-emerald-400 bg-emerald-400/10", bar: "bg-emerald-400" },
+  orange: { icon: "text-orange-400 bg-orange-400/10", bar: "bg-orange-400" },
 };
 type Accent = keyof typeof accentMap;
 
@@ -143,9 +143,8 @@ function TechComparisonTable({ rows, delay = 0 }: { rows: TechRow[]; delay?: num
           <thead>
             <tr className="border-b border-white/5">
               {headers.map((h) => (
-                <th key={h} className={`px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-600 ${
-                  h === "Technician" ? "text-left" : ["OT Before","OT After"].includes(h) ? "text-center" : "text-right"
-                }`}>{h}</th>
+                <th key={h} className={`px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-600 ${h === "Technician" ? "text-left" : ["OT Before", "OT After"].includes(h) ? "text-center" : "text-right"
+                  }`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -178,7 +177,7 @@ function TechComparisonTable({ rows, delay = 0 }: { rows: TechRow[]; delay?: num
 
 // ─── UrgencyPip ───────────────────────────────────────────────────────────────
 function UrgencyPip({ level }: { level: number }) {
-  const colors = ["bg-gray-500","bg-gray-400","bg-yellow-500","bg-orange-500","bg-red-500"];
+  const colors = ["bg-gray-500", "bg-gray-400", "bg-yellow-500", "bg-orange-500", "bg-red-500"];
   return (
     <span className="inline-flex items-center gap-0.5">
       {Array.from({ length: 5 }, (_, i) => (
@@ -210,10 +209,9 @@ function ScheduleTable({ title, badge, badgeClass, jobs, showScore, overtimeTech
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/5">
-              {["#","Job / ID","Technician","Revenue","Hrs","Urgency",...(showScore?["Score"]:[]),"OT"].map((h) => (
-                <th key={h} className={`px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-600 ${
-                  ["Revenue","Hrs","Score"].includes(h) ? "text-right" : ["#","OT","Urgency"].includes(h) ? "text-center" : "text-left"
-                }`}>{h}</th>
+              {["#", "Job / ID", "Technician", "Revenue", "Hrs", "Urgency", ...(showScore ? ["Score"] : []), "OT"].map((h) => (
+                <th key={h} className={`px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-600 ${["Revenue", "Hrs", "Score"].includes(h) ? "text-right" : ["#", "OT", "Urgency"].includes(h) ? "text-center" : "text-left"
+                  }`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -247,12 +245,12 @@ function ScheduleTable({ title, badge, badgeClass, jobs, showScore, overtimeTech
 // ─── DiagnosticChip ───────────────────────────────────────────────────────────
 function DiagnosticChip({ icon, label, value, sub, status = "neutral", delay = 0 }: {
   icon: React.ReactNode; label: string; value: string; sub: string;
-  status?: "good"|"warn"|"neutral"; delay?: number;
+  status?: "good" | "warn" | "neutral"; delay?: number;
 }) {
   const statusCls = {
-    good:    { border: "border-emerald-500/20", icon: "text-emerald-400 bg-emerald-400/10", value: "text-emerald-400" },
-    warn:    { border: "border-orange-500/20",  icon: "text-orange-400 bg-orange-400/10",   value: "text-orange-400"  },
-    neutral: { border: "border-white/10",       icon: "text-blue-400 bg-blue-400/10",       value: "text-white"       },
+    good: { border: "border-emerald-500/20", icon: "text-emerald-400 bg-emerald-400/10", value: "text-emerald-400" },
+    warn: { border: "border-orange-500/20", icon: "text-orange-400 bg-orange-400/10", value: "text-orange-400" },
+    neutral: { border: "border-white/10", icon: "text-blue-400 bg-blue-400/10", value: "text-white" },
   }[status];
   return (
     <motion.div
@@ -415,11 +413,10 @@ function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: 
   return (
     <div className="space-y-8">
       {/* Status badge */}
-      <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
-        isDemo
+      <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${isDemo
           ? "border-white/10 bg-white/5 text-gray-400"
           : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-      }`}>
+        }`}>
         <span className={`h-1.5 w-1.5 rounded-full ${isDemo ? "bg-gray-500" : "bg-emerald-400"}`} />
         {isDemo ? "Demo data — upload a CSV to analyze your schedule" : "Live data — results from your uploaded schedule"}
       </div>
@@ -452,9 +449,8 @@ function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: 
       {/* Technician strip */}
       <motion.div className="grid grid-cols-1 gap-3 sm:grid-cols-3" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.7 }}>
         {optimized.technicians.map((tech) => (
-          <div key={tech.id} className={`flex items-center justify-between rounded-xl border px-5 py-4 transition-colors ${
-            tech.overtime_flag ? "border-orange-500/30 bg-orange-500/5" : "border-white/10 bg-white/5"
-          }`}>
+          <div key={tech.id} className={`flex items-center justify-between rounded-xl border px-5 py-4 transition-colors ${tech.overtime_flag ? "border-orange-500/30 bg-orange-500/5" : "border-white/10 bg-white/5"
+            }`}>
             <div>
               <p className="text-sm font-semibold text-white">{tech.name}</p>
               <p className="mt-0.5 text-xs text-gray-500">{tech.total_hours}h &nbsp;·&nbsp; {formatCurrency(tech.revenue_per_hour)}/hr</p>
@@ -503,6 +499,7 @@ export default function DashboardPage() {
   const handleUploadSuccess = useCallback(async (date: string) => {
     setOptimizing(true);
     setOptimizeError(null);
+    setLiveResult(null); // clear stale results immediately on new upload
     try {
       const res = await fetch("/api/optimize", {
         method: "POST",
@@ -549,7 +546,7 @@ export default function DashboardPage() {
             Export from your FSM tool and upload. Analysis runs automatically.
           </p>
         </div>
-        <UploadCSV onSuccess={handleUploadSuccess} />
+        <UploadCSV onSuccess={handleUploadSuccess} onUploadStart={() => setLiveResult(null)} />
       </motion.div>
 
       {/* Optimization state */}
