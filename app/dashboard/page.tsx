@@ -6,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart2,
+  Calendar,
   Clock,
   DollarSign,
   Loader2,
@@ -492,14 +493,15 @@ function ResultsPanel({ result, isDemo }: { result: OptimizationResult; isDemo: 
 export default function DashboardPage() {
   const demoResult = useMemo(() => optimizeJobs(MOCK_JOBS), []);
 
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [liveResult, setLiveResult] = useState<OptimizationResult | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
 
-  const handleUploadSuccess = useCallback(async (date: string) => {
+  const fetchOptimization = useCallback(async (date: string) => {
     setOptimizing(true);
     setOptimizeError(null);
-    setLiveResult(null); // clear stale results immediately on new upload
+    setLiveResult(null);
     try {
       const res = await fetch("/api/optimize", {
         method: "POST",
@@ -519,6 +521,17 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const handleUploadSuccess = useCallback((date: string) => {
+    setSelectedDate(date);
+    fetchOptimization(date);
+  }, [fetchOptimization]);
+
+  const handleDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const date = e.target.value;
+    setSelectedDate(date);
+    fetchOptimization(date);
+  }, [fetchOptimization]);
+
   const activeResult = liveResult ?? demoResult;
   const isDemo = liveResult === null;
 
@@ -533,18 +546,31 @@ export default function DashboardPage() {
         </p>
       </motion.div>
 
-      {/* Upload panel */}
+      {/* Date picker + Upload panel */}
       <motion.div
         className="rounded-xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.05 }}
       >
-        <div className="mb-4">
-          <h2 className="text-sm font-semibold text-white">Upload Schedule CSV</h2>
-          <p className="mt-0.5 text-xs text-gray-500">
-            Export from your FSM tool and upload. Analysis runs automatically.
-          </p>
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Upload Schedule CSV</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Export from your FSM tool and upload. Analysis runs automatically.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-gray-400" />
+            <label htmlFor="dashboard-date" className="text-xs text-gray-400">View date</label>
+            <input
+              id="dashboard-date"
+              type="date"
+              value={selectedDate}
+              onChange={handleDateChange}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
         </div>
         <UploadCSV onSuccess={handleUploadSuccess} onUploadStart={() => setLiveResult(null)} />
       </motion.div>
