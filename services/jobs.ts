@@ -361,9 +361,8 @@ export interface InsertJobsBulkResult {
  * Strategy:
  *   1. Resolve technician IDs from the pre-built map.
  *   2. Compute job_signature and row_hash for each row.
- *   3. Fetch existing jobs by signature to detect duplicates.
- *   4. Partition into inserts (new), updates (changed), unchanged (skip).
- *   5. Execute inserts and updates in batches of BATCH_SIZE.
+ *   3. Fetch existing row_hash values by signature to skip unchanged rows.
+ *   4. Upsert remaining rows in batches using ON CONFLICT (company_id, job_signature).
  */
 export async function insertJobsBulk({
   rows,
@@ -375,8 +374,7 @@ export async function insertJobsBulk({
   let updated = 0;
   let unchanged = 0;
   const failed: RowError[] = [];
-  let insertBatchCount = 0;
-  let updateBatchCount = 0;
+  let upsertBatchCount = 0;
 
   // 1. Build payloads with signature + hash, resolve tech IDs
   type JobPayload = {
@@ -387,7 +385,6 @@ export async function insertJobsBulk({
     duration_estimate_hours: number;
     urgency: number;
     job_name: string;
-    external_job_id: string;
     job_signature: string;
     row_hash: string;
   };
@@ -423,94 +420,87 @@ export async function insertJobsBulk({
         duration_estimate_hours: row.duration_hours,
         urgency: row.urgency,
         job_name: row.job_name,
-        external_job_id: row.job_id,
         job_signature: signature,
         row_hash: hash,
       },
     });
   }
 
-  // 2. Fetch existing jobs by signature for change detection
+  // 2. Fetch existing row_hash values by signature to skip unchanged rows
   const allSignatures = payloads.map((p) => p.payload.job_signature);
-  const existingSigMap = new Map<string, { id: string; row_hash: string | null }>();
+  const existingHashMap = new Map<string, string | null>();
 
   for (const sigChunk of chunk(allSignatures, 500)) {
     const { data, error } = await db
       .from("jobs")
-      .select("id, job_signature, row_hash")
+      .select("job_signature, row_hash")
       .eq("company_id", companyId)
       .in("job_signature", sigChunk);
 
     if (error) {
-      // Non-fatal: fall back to treating all as inserts
+      // Non-fatal: proceed with upsert for all rows (Postgres handles conflict)
       break;
     }
     if (data) {
       for (const row of data) {
         if (row.job_signature) {
-          existingSigMap.set(row.job_signature, { id: row.id, row_hash: row.row_hash });
+          existingHashMap.set(row.job_signature, row.row_hash);
         }
       }
     }
   }
 
-  // 3. Partition into inserts, updates, unchanged
-  const toInsert: Array<{ sourceRow: number; payload: JobPayload }> = [];
-  const toUpdate: Array<{ sourceRow: number; existingId: string; payload: JobPayload }> = [];
+  // 3. Filter out unchanged rows (same signature + same hash)
+  const toUpsert: Array<{ sourceRow: number; payload: JobPayload; isNew: boolean }> = [];
 
   for (const item of payloads) {
-    const existing = existingSigMap.get(item.payload.job_signature);
+    const existingHash = existingHashMap.get(item.payload.job_signature);
 
-    if (!existing) {
-      // New row — INSERT
-      toInsert.push(item);
-    } else if (existing.row_hash !== item.payload.row_hash) {
-      // Signature matches but content changed — UPDATE
-      toUpdate.push({ sourceRow: item.sourceRow, existingId: existing.id, payload: item.payload });
+    if (existingHash === undefined) {
+      // No existing row — will INSERT
+      toUpsert.push({ ...item, isNew: true });
+    } else if (existingHash !== item.payload.row_hash) {
+      // Signature matches but content changed — will UPDATE via upsert
+      toUpsert.push({ ...item, isNew: false });
     } else {
       // Signature + hash match — skip
       unchanged++;
     }
   }
 
-  // 4. Batched inserts
-  for (const batch of chunk(toInsert, BATCH_SIZE)) {
-    insertBatchCount++;
-    const { data, error } = await db
+  // 4. Batched upsert using ON CONFLICT (company_id, job_signature)
+  for (const batch of chunk(toUpsert, BATCH_SIZE)) {
+    upsertBatchCount++;
+    const newCount = batch.filter((b) => b.isNew).length;
+    const updateCount = batch.length - newCount;
+
+    const { error } = await db
       .from("jobs")
-      .insert(batch.map((b) => b.payload))
-      .select("id");
+      .upsert(batch.map((b) => b.payload), {
+        onConflict: "company_id,job_signature",
+        ignoreDuplicates: false,
+      });
 
     if (error) {
-      // If batch insert fails, try individual inserts as fallback
+      // If batch upsert fails, try individual upserts as fallback
       for (const item of batch) {
-        const { error: singleErr } = await db.from("jobs").insert(item.payload);
+        const { error: singleErr } = await db
+          .from("jobs")
+          .upsert(item.payload, {
+            onConflict: "company_id,job_signature",
+            ignoreDuplicates: false,
+          });
         if (singleErr) {
           failed.push({ row: item.sourceRow, message: singleErr.message });
-        } else {
+        } else if (item.isNew) {
           inserted++;
+        } else {
+          updated++;
         }
       }
     } else {
-      inserted += data?.length ?? batch.length;
-    }
-  }
-
-  // 5. Batched updates (individual UPDATE per row — safe for varying payloads)
-  for (const batch of chunk(toUpdate, BATCH_SIZE)) {
-    updateBatchCount++;
-    for (const item of batch) {
-      const { company_id: _cid, job_signature: _sig, ...updateFields } = item.payload;
-      const { error } = await db
-        .from("jobs")
-        .update(updateFields)
-        .eq("id", item.existingId);
-
-      if (error) {
-        failed.push({ row: item.sourceRow, message: error.message });
-      } else {
-        updated++;
-      }
+      inserted += newCount;
+      updated += updateCount;
     }
   }
 
@@ -519,8 +509,8 @@ export async function insertJobsBulk({
     updated,
     unchanged,
     failed,
-    jobs_insert_batch_count: insertBatchCount,
-    jobs_update_batch_count: updateBatchCount,
+    jobs_insert_batch_count: upsertBatchCount,
+    jobs_update_batch_count: 0,
   };
 }
 

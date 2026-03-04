@@ -34,11 +34,12 @@ interface UploadErrorDetails {
 
 interface UploadCSVProps {
   onSuccess: (date: string) => void;
+  onUploadStart?: () => void;
 }
 
 type UploadState = "idle" | "uploading" | "success" | "error";
 
-export function UploadCSV({ onSuccess }: UploadCSVProps) {
+export function UploadCSV({ onSuccess, onUploadStart }: UploadCSVProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -72,6 +73,7 @@ export function UploadCSV({ onSuccess }: UploadCSVProps) {
     setError(null);
     setErrorDetails(null);
     setResult(null);
+    onUploadStart?.();
 
     try {
       const form = new FormData();

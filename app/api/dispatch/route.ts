@@ -4,18 +4,20 @@ import { getApiContext } from "@/lib/apiContext";
 
 export const dynamic = "force-dynamic";
 
-// ─── GET /api/dispatch?date= ──────────────────────────────────────────────────
+// ─── GET /api/dispatch?date= or ?start=&end= ─────────────────────────────────
 // Returns all technicians for the authenticated user's company and all jobs for
-// a given date, ordered by technician then order_index.
+// a date range, ordered by job_date then technician then order_index.
 //
-// Query params:
-//   date        — YYYY-MM-DD (defaults to today)
+// Query params (two modes):
+//   date        — YYYY-MM-DD single day (backward compat, defaults to today)
+//   start, end  — YYYY-MM-DD range (inclusive). Default: 7-day window from today.
 //
 // Returns: {
 //   success: true,
-//   date: string,
+//   start: string,
+//   end: string,
 //   technicians: Technician[],
-//   jobs: DispatchJob[],   // includes customer_name via join
+//   jobs: DispatchJob[],
 // }
 
 interface TechnicianRow {
@@ -46,15 +48,46 @@ function today(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+/** Adds N days to a YYYY-MM-DD string. */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { db, companyId } = await getApiContext();
 
     const { searchParams } = new URL(req.url);
-    const date = searchParams.get("date") ?? today();
 
-    if (!DATE_RE.test(date)) {
-      return NextResponse.json({ success: false, error: "date must be YYYY-MM-DD" }, { status: 400 });
+    // Resolve date range: prefer start/end, fall back to date (single day),
+    // default to 7-day window from today.
+    let start: string;
+    let end: string;
+
+    const paramStart = searchParams.get("start");
+    const paramEnd = searchParams.get("end");
+    const paramDate = searchParams.get("date");
+
+    if (paramStart && paramEnd) {
+      start = paramStart;
+      end = paramEnd;
+    } else if (paramDate) {
+      // Backward compat: single date = one-day range
+      start = paramDate;
+      end = paramDate;
+    } else {
+      start = today();
+      end = addDays(start, 6);
+    }
+
+    if (!DATE_RE.test(start) || !DATE_RE.test(end)) {
+      return NextResponse.json({ success: false, error: "start and end must be YYYY-MM-DD" }, { status: 400 });
+    }
+
+    if (start > end) {
+      return NextResponse.json({ success: false, error: "start must be <= end" }, { status: 400 });
     }
 
     // Fetch technicians and jobs in parallel
@@ -69,7 +102,9 @@ export async function GET(req: NextRequest) {
         .from("jobs")
         .select("id, technician_id, customer_id, job_date, revenue_estimate, duration_estimate_hours, urgency, status, scheduled_start, scheduled_end, order_index, customers(full_name), technicians(name)")
         .eq("company_id", companyId)
-        .eq("job_date", date)
+        .gte("job_date", start)
+        .lte("job_date", end)
+        .order("job_date")
         .order("technician_id", { nullsFirst: true })
         .order("order_index"),
     ]);
@@ -109,7 +144,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      date,
+      start,
+      end,
       technicians,
       jobs,
     });
